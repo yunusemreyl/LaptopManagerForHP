@@ -1,0 +1,8 @@
+__pycache__/
+*.o
+*.ko
+*.mod*
+*.order
+*.symvers
+.cache/
+config.json

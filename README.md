@@ -72,9 +72,11 @@ This project builds upon and modernizes earlier community efforts:
 
 * **hp-omen-linux-module**
   Provided the initial WMI kernel module logic for HP Omen / Victus laptops.
+  [https://github.com/pelrun/hp-omen-linux-module](https://github.com/pelrun/hp-omen-linux-module)
 
 * **hp-laptop-rgb-controller**
   Inspired the Python-based RGB keyboard control logic.
+  [https://github.com/kaankutan/hp-laptop-rgb-controller](https://github.com/kaankutan/hp-laptop-rgb-controller)
 
 ### My Contributions
 

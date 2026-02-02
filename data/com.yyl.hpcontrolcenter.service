@@ -1,0 +1,19 @@
+[Unit]
+Description=HP Control Center Service
+After=dbus.service
+Requires=dbus.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /usr/libexec/hp-control/omen_service.py
+Restart=on-failure
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+NoNewPrivileges=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+ReadWritePaths=/sys/devices/platform/hp-omen-rgb
+
+[Install]
+WantedBy=multi-user.target

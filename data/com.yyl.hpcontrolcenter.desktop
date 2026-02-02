@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=Omen Control Center
+Comment=HP Omen ve Victus için RGB Klavye Kontrolcüsü
+Exec=/usr/bin/omen-control-center
+Icon=omen-control-center
+Terminal=false
+Type=Application
+Categories=Utility;Settings;HardwareSettings;
+Keywords=HP;Omen;Victus;RGB;Keyboard;Light;
+StartupNotify=true

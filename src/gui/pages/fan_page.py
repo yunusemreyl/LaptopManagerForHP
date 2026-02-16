@@ -491,13 +491,15 @@ class FanPage(Gtk.Box):
         data = self.monitor.get_data()
         cpu_t = data.get("cpu_temp", 0)
         gpu_t = data.get("gpu_temp", 0)
+        fan_info = data.get("fan_info", {})
+        power_profile = data.get("power_profile", {})
         
         # Update history
         self.temp_history.append(cpu_t)
         if len(self.temp_history) > 5: # Keep last 5 seconds
             self.temp_history.pop(0)
             
-        # Draw current temp marker on curve (use instant or avg? instant is better for visual)
+        # Draw current temp marker on curve
         self.fan_curve.set_current_temp(cpu_t)
         
         self.cpu_label.set_label(f"{int(cpu_t)}°C")
@@ -506,30 +508,34 @@ class FanPage(Gtk.Box):
         if self.fan_mode in ("standard", "custom"):
             self._apply_fan_curve()
             
-        # ... rest of refresh ...
+        # Sync Power Profile UI
+        active_profile = power_profile.get("profile", "")
+        if active_profile and active_profile in self.profile_buttons:
+             btn = self.profile_buttons[active_profile]
+             if not btn.get_active():
+                 # Set active, which will trigger the handler and reassure the daemon
+                 # This also visually updates the UI
+                 btn.set_active(True)
+        
+        if active_profile:
+             self.pp_status.set_label(f"{T('active_profile')}: {active_profile}")
 
+        # Sync Fan Data
         available = fan_info.get("available", False)
         if available:
             self.fan_warning.set_visible(False)
             daemon_mode = fan_info.get("mode", "auto")
             
             # Map daemon modes to UI modes
-            # Daemon 'auto' -> Force to 'standard' (software control)
-            # Daemon 'custom' -> 'standard' or 'custom' depending on current
-            # Daemon 'max' -> 'max'
-            
             target_ui_mode = self.fan_mode
             
             if daemon_mode == "auto":
-                # If daemon is in hardware auto, we want to force software standard
                 target_ui_mode = "standard"
                 if self.fan_mode != "standard":
-                     self._on_fan_mode("standard") # Apply standard mode immediately
+                     self._on_fan_mode("standard") 
             elif daemon_mode == "max":
                 target_ui_mode = "max"
             elif daemon_mode == "custom":
-                # If we are already in standard or custom, stay there
-                # If we are in max, default to standard?
                 if self.fan_mode not in ("standard", "custom"):
                     target_ui_mode = "standard"
             
@@ -541,12 +547,14 @@ class FanPage(Gtk.Box):
             # Update gauges
             fans = fan_info.get("fans", {})
             if "1" in fans:
-                rpm1, max1 = fans["1"]["current"], fans["1"]["max"]
+                rpm1 = fans["1"].get("current", 0)
+                max1 = fans["1"].get("max", 5800)
                 pct1 = min(rpm1 / max1 * 100, 100) if max1 > 0 else 0
                 self.fan1_gauge.set_val(pct1, f"{rpm1}")
                 self.fan1_rpm_lbl.set_label(f"{rpm1} RPM")
             if "2" in fans:
-                rpm2, max2 = fans["2"]["current"], fans["2"]["max"]
+                rpm2 = fans["2"].get("current", 0)
+                max2 = fans["2"].get("max", 5800)
                 pct2 = min(rpm2 / max2 * 100, 100) if max2 > 0 else 0
                 self.fan2_gauge.set_val(pct2, f"{rpm2}")
                 self.fan2_rpm_lbl.set_label(f"{rpm2} RPM")

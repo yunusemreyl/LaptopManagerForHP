@@ -1,0 +1,19 @@
+[Unit]
+Description=HP Laptop Manager Daemon
+After=dbus.service
+Requires=dbus.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /usr/libexec/hp-manager/hp_manager_service.py
+Restart=on-failure
+RestartSec=5
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+NoNewPrivileges=false
+ProtectKernelTunables=false
+ReadWritePaths=/sys/devices/platform/hp-omen-rgb /sys/class/hwmon /etc/hp-manager
+
+[Install]
+WantedBy=multi-user.target

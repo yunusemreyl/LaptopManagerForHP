@@ -162,8 +162,29 @@ class FanPage(Gtk.Box):
         # Use average temp for stability
         avg_temp = sum(self.temp_history) / len(self.temp_history)
         
-        # Get target percentage from curve
-        fan_pct = self.fan_curve.get_fan_pct_for_temp(avg_temp)
+        # Calculate target percentage
+        fan_pct = 0
+        if self.fan_mode == "standard":
+            # Stepped logic (User request: "Dümdüz çizgi", Flat lines)
+            # < 48: 0
+            # 48 - 58: 2000 RPM (~35%)
+            # 58 - 70: 3500 RPM (~60%)
+            # 70 - 78: 4200 RPM (~72%)
+            # 78 - 85: 4200 RPM (72%) (Assuming flat until 85)
+            # >= 85: 100%
+            if avg_temp < 48:
+                fan_pct = 0
+            elif avg_temp < 58:
+                fan_pct = 35 # ~2000 RPM
+            elif avg_temp < 70:
+                fan_pct = 60 # ~3500 RPM
+            elif avg_temp < 85:
+                fan_pct = 72 # ~4200 RPM, keeps flat till 85
+            else:
+                fan_pct = 100
+        else:
+            # Custom mode: Use curve widget interpolation
+            fan_pct = self.fan_curve.get_fan_pct_for_temp(avg_temp)
         
         if self.service:
             try:
@@ -185,14 +206,6 @@ class FanPage(Gtk.Box):
                     if last >= 0 and abs(target_rpm - last) < 300:
                         continue
                         
-                    # Send command (assuming SetFanTarget exists in service, 
-                    # if not we might need to use SetFanSpeed or similar)
-                    # Note: hp_manager_service.py usually exposes SetFanTarget?
-                    # If not, let's look at the previous context. 
-                    # The service seemed to have SetFanMode. 
-                    # If SetFanTarget is missing, this will fail.
-                    # But the user said "fan profillerinde sürekli fan hızı değişiyor"
-                    # which implies it IS working but unstable.
                     self.service.SetFanTarget(int(fn), target_rpm)
                     self.last_applied_rpm[fn] = target_rpm
             except Exception as e:

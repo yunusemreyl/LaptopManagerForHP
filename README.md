@@ -97,8 +97,6 @@ sudo ./uninstall.sh
 ## 👨‍💻 Credits & Acknowledgments
 - **Lead Developer**: [yunusemreyl](https://github.com/yunusemreyl)
 - **Kernel Module Development**: Special thanks to **[TUXOV](https://github.com/TUXOV/hp-wmi-fan-and-backlight-control)** for the `hp-wmi-fan-and-backlight-control` driver, which makes fan control possible.
-- **RGB Driver Inspiration**: [hp-laptop-rgb-controller](https://github.com/dmitry-s93/hp-laptop-rgb-controller)
-- **Kernel Module Reference**: [hp-omen-linux-module](https://github.com/homen-linux/hp-omen-linux-module)
 
 ## ⚖️ Legal Disclaimer
 This tool is an independent open-source project developed by **yunusemreyl**.

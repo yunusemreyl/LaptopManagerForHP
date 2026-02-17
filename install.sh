@@ -251,7 +251,7 @@ uninstall_app() {
 # --- MAIN ---
 echo -e "${CYAN}"
 echo "  ╔═══════════════════════════════════╗"
-echo "  ║     HP Laptop Manager Installer    ║"
+echo "  ║    HP Laptop Manager Installer    ║"
 echo "  ╚═══════════════════════════════════╝"
 echo -e "${NC}"
 

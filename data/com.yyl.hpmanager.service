@@ -8,11 +8,20 @@ Type=simple
 ExecStart=/usr/bin/python3 /usr/libexec/hp-manager/hp_manager_service.py
 Restart=on-failure
 RestartSec=5
+
+# Security hardening
 ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
-NoNewPrivileges=false
-ProtectKernelTunables=false
+NoNewPrivileges=true
+ProtectKernelTunables=true
+PrivateDevices=true
+ProtectControlGroups=true
+ProtectKernelModules=true
+LockPersonality=true
+RestrictSUIDSGID=true
+
+# Required paths for HP hardware access
 ReadWritePaths=/sys/devices/platform/hp-omen-rgb /sys/class/hwmon /etc/hp-manager
 
 [Install]

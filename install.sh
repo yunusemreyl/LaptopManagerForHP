@@ -190,6 +190,11 @@ LAUNCHER
     chmod +x "$BIN_LINK"
     log "$(msg launcher_created $BIN_LINK)"
 
+    # Create required directories for system files (fixes Arch issue)
+    mkdir -p /etc/dbus-1/system.d
+    mkdir -p /usr/share/polkit-1/actions
+    mkdir -p /usr/share/applications
+
     # Install system files
     cp data/com.yyl.hpmanager.conf /etc/dbus-1/system.d/
     cp data/com.yyl.hpmanager.service /etc/systemd/system/hp-manager.service

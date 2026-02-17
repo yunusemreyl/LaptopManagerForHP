@@ -3,7 +3,7 @@
 HP Laptop Manager - D-Bus Daemon Service
 Root olarak çalışır, donanım erişimi sağlar.
 """
-import sys, os, time, threading, logging, json, colorsys, math, shutil, subprocess
+import sys, os, time, threading, logging, json, colorsys, math, shutil, subprocess, re
 from gi.repository import GLib
 from pydbus import SystemBus
 
@@ -16,6 +16,10 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 logger = logging.getLogger("hp-manager")
 
 lock = threading.RLock()
+HEX_COLOR_RE = re.compile(r"^[0-9A-F]{6}$")
+VALID_LIGHT_MODES = {"static", "breathing", "cycle", "wave"}
+VALID_DIRECTIONS = {"ltr", "rtl"}
+VALID_GPU_MODES = {"hybrid", "discrete", "integrated"}
 
 # ============================================================
 # FAN CONTROLLER
@@ -373,6 +377,14 @@ state = {
     "power": True,
 }
 
+ALLOWED_PACKAGES = {
+    "steam": "com.valvesoftware.Steam",
+    "lutris": "net.lutris.Lutris",
+    "protonup-qt": "net.davidotek.pupgui2",
+    "heroic": "com.heroicgameslauncher.hgl",
+    "mangohud": "org.freedesktop.Platform.VulkanLayer.MangoHud",
+}
+
 fan_ctrl = FanController()
 rgb_ctrl = RGBController()
 power_ctrl = PowerProfileController()
@@ -395,7 +407,29 @@ def load_state():
         try:
             if os.path.exists(CONFIG_FILE):
                 with open(CONFIG_FILE) as f:
-                    state.update(json.load(f))
+                    loaded = json.load(f)
+                if isinstance(loaded, dict):
+                    if loaded.get("mode") in VALID_LIGHT_MODES:
+                        state["mode"] = loaded["mode"]
+                    colors = loaded.get("colors")
+                    if isinstance(colors, list):
+                        cleaned = []
+                        for c in colors[:4]:
+                            c = str(c).lstrip("#").upper()
+                            if HEX_COLOR_RE.match(c):
+                                cleaned.append(c)
+                        if cleaned:
+                            state["colors"] = (cleaned + [state["colors"][0]] * 4)[:4]
+                    speed = loaded.get("speed")
+                    if isinstance(speed, int):
+                        state["speed"] = max(1, min(speed, 100))
+                    brightness = loaded.get("brightness")
+                    if isinstance(brightness, int):
+                        state["brightness"] = max(0, min(brightness, 100))
+                    if loaded.get("direction") in VALID_DIRECTIONS:
+                        state["direction"] = loaded["direction"]
+                    if isinstance(loaded.get("power"), bool):
+                        state["power"] = loaded["power"]
         except:
             pass
 
@@ -425,29 +459,37 @@ class HPManagerService(object):
     """
 
     def SetColor(self, z, h):
+        c = str(h).lstrip("#").upper()
+        if not HEX_COLOR_RE.match(c):
+            return "FAIL"
         with lock:
             state["mode"] = "static"
             state["power"] = True
-            c = h.lstrip("#").upper()
             if z == 4:
                 state["colors"] = [c] * 4
             elif 0 <= z < 4:
                 state["colors"][z] = c
+            else:
+                return "FAIL"
         save_state()
         return "OK"
 
     def SetMode(self, m, s):
+        if m not in VALID_LIGHT_MODES:
+            return "FAIL"
         with lock:
             state["mode"] = m
-            state["speed"] = int(s)
+            state["speed"] = max(1, min(int(s), 100))
             state["power"] = True
         save_state()
         return "OK"
 
     def SetGlobal(self, p, b, d):
+        if d not in VALID_DIRECTIONS:
+            return "FAIL"
         with lock:
             state["power"] = bool(p)
-            state["brightness"] = int(b)
+            state["brightness"] = max(0, min(int(b), 100))
             state["direction"] = d
         save_state()
         return "OK"
@@ -484,6 +526,8 @@ class HPManagerService(object):
         return json.dumps(info)
 
     def SetPowerProfile(self, profile):
+        if profile not in power_ctrl.get_profiles():
+            return "FAIL"
         ok = power_ctrl.set_profile(profile)
         return "OK" if ok else "FAIL"
 
@@ -495,6 +539,8 @@ class HPManagerService(object):
         })
 
     def SetGpuMode(self, mode):
+        if mode not in VALID_GPU_MODES:
+            return "FAIL"
         return mux_ctrl.set_mode(mode)
 
     def GetGpuInfo(self):
@@ -535,43 +581,23 @@ class HPManagerService(object):
         return json.dumps(info)
 
     def InstallPackage(self, pkg):
-        """Install a package using the system package manager."""
-        pkg_managers = [
-            ("pacman", ["-S", "--noconfirm"]),
-            ("apt", ["install", "-y"]),
-            ("dnf", ["install", "-y"]),
-            ("zypper", ["install", "-y"]),
-        ]
-        # Flatpak packages
-        flatpak_map = {
-            "steam": "com.valvesoftware.Steam",
-            "lutris": "net.lutris.Lutris",
-            "protonup-qt": "net.davidotek.pupgui2",
-            "heroic": "com.heroicgameslauncher.hgl",
-            "mangohud": "org.freedesktop.Platform.VulkanLayer.MangoHud",
-        }
+        """Install only known gaming packages with a fixed mapping."""
+        pkg = str(pkg).strip().lower()
+        flatpak_id = ALLOWED_PACKAGES.get(pkg)
+        if not flatpak_id:
+            return "Error: package_not_allowed"
 
-        # Try flatpak first for known packages
-        if pkg in flatpak_map and shutil.which("flatpak"):
+        if shutil.which("flatpak"):
             try:
                 subprocess.run(
-                    ["flatpak", "install", "-y", "flathub", flatpak_map[pkg]],
+                    ["flatpak", "install", "-y", "--noninteractive", "flathub", flatpak_id],
                     check=True, capture_output=True
                 )
                 return "OK"
             except:
-                pass
+                return "Error: flatpak_install_failed"
 
-        # Fallback to native package manager
-        for pm, args in pkg_managers:
-            if shutil.which(pm):
-                try:
-                    subprocess.run([pm] + args + [pkg], check=True, capture_output=True)
-                    return "OK"
-                except Exception as e:
-                    return f"Error: {e}"
-
-        return "No package manager found"
+        return "No supported package manager found"
 
 
 def main():

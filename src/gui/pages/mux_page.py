@@ -182,7 +182,7 @@ class MUXPage(Gtk.Box):
                 result = self.service.SetGpuMode(mode)
                 if result == "OK":
                     self.status_label.set_label(T("mode_set").format(mode=mode))
-                    os.system("systemctl reboot")
+                    subprocess.run(["systemctl", "reboot"], check=False)
                 else:
                     self.status_label.set_label(f"{T('error')}: {result}")
             except Exception as e:

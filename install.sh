@@ -232,14 +232,15 @@ LAUNCHER
     log "Omen Key handler installed"
 
     # ── Driver module management ──
-    # Blacklist stock hp-wmi so our patched version (with fan control) loads
-    BLACKLIST_FILE="/etc/modprobe.d/hp-omen-core.conf"
-    cat > "$BLACKLIST_FILE" << 'MODCONF'
-# HP Laptop Manager: blacklist stock hp-wmi so that the DKMS-patched
-# version (with manual fan control & Omen Key) takes priority.
-blacklist hp-wmi
+    # Enable automatic loading of hp-omen-core on boot
+    MODULES_LOAD_FILE="/etc/modules-load.d/hp-omen-core.conf"
+    cat > "$MODULES_LOAD_FILE" << 'MODCONF'
+# HP Laptop Manager: load the companion driver for Omen/Victus
+hp-omen-core
 MODCONF
-    log "Stock hp-wmi blacklisted ($BLACKLIST_FILE)"
+    # Remove old blacklist if it exists
+    rm -f /etc/modprobe.d/hp-omen-core.conf 2>/dev/null || true
+    log "hp-omen-core set to load on boot ($MODULES_LOAD_FILE)"
 
     # Remove stock module if loaded, then load project's modules
     rmmod hp_wmi 2>/dev/null || true
@@ -284,6 +285,7 @@ rm -f /etc/udev/rules.d/90-hp-omen-key.rules
 rm -f /usr/lib/systemd/user/hp-omen-key.service
 rm -f /usr/libexec/hp-manager/omen-key-listener.sh
 rm -f /etc/modprobe.d/hp-omen-core.conf
+rm -f /etc/modules-load.d/hp-omen-core.conf
 systemctl daemon-reload
 echo "Kaldırma işlemi tamamlandı."
 UNINSTALLER

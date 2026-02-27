@@ -35,6 +35,8 @@ else
     rm -f /usr/share/polkit-1/actions/com.yyl.hpmanager.policy
     rm -f /usr/share/applications/com.yyl.hpmanager.desktop
     rm -f /usr/share/icons/hicolor/48x48/apps/hp_logo.png
+    rm -f /etc/modprobe.d/hp-omen-core.conf
+    rm -f /etc/modules-load.d/hp-omen-core.conf
     systemctl daemon-reload
     
     if [ "$LANG_CODE" == "tr" ]; then

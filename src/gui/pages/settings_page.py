@@ -15,17 +15,18 @@ def T(k):
     return _T(k)
 
 
-APP_VERSION = "4.0"
+APP_VERSION = "4.5"
 GITHUB_REPO = "yunusemreyl/LaptopManagerForHP"
 GITHUB_API_URL = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 GITHUB_RELEASES_URL = f"https://github.com/{GITHUB_REPO}/releases/latest"
 
 
 class SettingsPage(Gtk.Box):
-    def __init__(self, on_theme_change=None, on_lang_change=None):
+    def __init__(self, on_theme_change=None, on_lang_change=None, on_temp_unit_change=None):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=20)
         self.on_theme_change = on_theme_change
         self.on_lang_change = on_lang_change
+        self.on_temp_unit_change = on_temp_unit_change
         self.set_margin_top(30)
         self.set_margin_start(40)
         self.set_margin_end(40)
@@ -64,6 +65,16 @@ class SettingsPage(Gtk.Box):
         self.lang_dd.connect("notify::selected", self._on_lang)
         lang_row.append(self.lang_dd)
         appear_card.append(lang_row)
+
+        appear_card.append(Gtk.Separator())
+
+        # Temperature Unit
+        temp_row = Gtk.Box(spacing=20)
+        temp_row.append(Gtk.Label(label=T("temp_unit"), hexpand=True, xalign=0))
+        self.temp_dd = Gtk.DropDown(model=Gtk.StringList.new([T("celsius"), T("fahrenheit")]))
+        self.temp_dd.connect("notify::selected", self._on_temp_unit)
+        temp_row.append(self.temp_dd)
+        appear_card.append(temp_row)
 
         content.append(appear_card)
 
@@ -121,10 +132,10 @@ class SettingsPage(Gtk.Box):
         driver_card.add_css_class("card")
         driver_card.append(Gtk.Label(label=T("driver_status"), xalign=0, css_classes=["section-title"]))
 
+        hp_omen_core_loaded = os.path.exists("/sys/devices/platform/hp-omen-core")
         hp_wmi_loaded = os.path.exists("/sys/devices/platform/hp-wmi")
-        rgb_loaded = os.path.exists("/sys/devices/platform/hp-omen-rgb")
 
-        drivers = [("hp-wmi", hp_wmi_loaded), ("hp-omen-rgb", rgb_loaded)]
+        drivers = [("hp-omen-core", hp_omen_core_loaded), ("hp-wmi (Fan/Thermal/Key)", hp_wmi_loaded)]
         for name, loaded in drivers:
             row = Gtk.Box(spacing=20)
             row.append(Gtk.Label(label=name, hexpand=True, xalign=0))
@@ -229,6 +240,14 @@ class SettingsPage(Gtk.Box):
 
     def set_lang_index(self, idx):
         self.lang_dd.set_selected(idx)
+
+    def set_temp_unit_index(self, idx):
+        self.temp_dd.set_selected(idx)
+
+    def _on_temp_unit(self, dd, _):
+        unit = "C" if dd.get_selected() == 0 else "F"
+        if self.on_temp_unit_change:
+            self.on_temp_unit_change(unit)
 
     def _get_distro(self):
         try:

@@ -137,16 +137,16 @@ install_deps() {
 
     case $PM in
         pacman)
-            $INSTALL_CMD python python-gobject gtk4 libadwaita python-pydbus python-cairo power-profiles-daemon
+            $INSTALL_CMD python python-gobject gtk4 libadwaita python-pydbus python-cairo power-profiles-daemon evtest
             ;;
         apt)
-            $INSTALL_CMD python3 python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 python3-pydbus python3-cairo power-profiles-daemon
+            $INSTALL_CMD python3 python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 python3-pydbus python3-cairo power-profiles-daemon evtest
             ;;
         dnf)
-            $INSTALL_CMD python3 python3-gobject gtk4 libadwaita python3-pydbus python3-cairo power-profiles-daemon
+            $INSTALL_CMD python3 python3-gobject gtk4 libadwaita python3-pydbus python3-cairo power-profiles-daemon evtest
             ;;
         zypper)
-            $INSTALL_CMD python3 python3-gobject gtk4 libadwaita python3-pydbus python3-cairo power-profiles-daemon
+            $INSTALL_CMD python3 python3-gobject gtk4 libadwaita python3-pydbus python3-cairo power-profiles-daemon evtest
             ;;
     esac
 
@@ -161,6 +161,20 @@ install_app() {
     mkdir -p "$INSTALL_DIR"
     mkdir -p "$DATA_DIR/images"
     mkdir -p /etc/hp-manager
+
+    # ── Language Selection Menu ──
+    echo ""
+    echo -e "${CYAN}╔═══════════════════════════════════╗${NC}"
+    echo -e "${CYAN}║   Language / Dil Selection         ║${NC}"
+    echo -e "${CYAN}╠═══════════════════════════════════╣${NC}"
+    echo -e "${CYAN}║  0) All languages (default)        ║${NC}"
+    echo -e "${CYAN}║  1) English                        ║${NC}"
+    echo -e "${CYAN}║  2) Türkçe                         ║${NC}"
+    echo -e "${CYAN}╚═══════════════════════════════════╝${NC}"
+    echo ""
+    read -t 15 -p "Select [0-2, default=0]: " LANG_CHOICE || LANG_CHOICE=0
+    LANG_CHOICE=${LANG_CHOICE:-0}
+    echo ""
 
     # Copy daemon
     cp -r src/daemon/* "$INSTALL_DIR/"
@@ -202,6 +216,37 @@ LAUNCHER
     cp data/com.yyl.hpmanager.desktop /usr/share/applications/
     log "$(msg sys_files_installed)"
 
+    # Install Omen Key handler
+    mkdir -p /usr/libexec/hp-manager
+    if [ -f data/90-hp-omen-key.rules ]; then
+        cp data/90-hp-omen-key.rules /etc/udev/rules.d/
+    fi
+    if [ -f data/hp-omen-key.service ]; then
+        mkdir -p /usr/lib/systemd/user
+        cp data/hp-omen-key.service /usr/lib/systemd/user/
+    fi
+    if [ -f data/omen-key-listener.sh ]; then
+        cp data/omen-key-listener.sh /usr/libexec/hp-manager/
+        chmod +x /usr/libexec/hp-manager/omen-key-listener.sh
+    fi
+    log "Omen Key handler installed"
+
+    # ── Driver module management ──
+    # Blacklist stock hp-wmi so our patched version (with fan control) loads
+    BLACKLIST_FILE="/etc/modprobe.d/hp-omen-core.conf"
+    cat > "$BLACKLIST_FILE" << 'MODCONF'
+# HP Laptop Manager: blacklist stock hp-wmi so that the DKMS-patched
+# version (with manual fan control & Omen Key) takes priority.
+blacklist hp-wmi
+MODCONF
+    log "Stock hp-wmi blacklisted ($BLACKLIST_FILE)"
+
+    # Remove stock module if loaded, then load project's modules
+    rmmod hp_wmi 2>/dev/null || true
+    rmmod hp_omen_core 2>/dev/null || true
+    modprobe hp-wmi 2>/dev/null || warn "hp-wmi module could not be loaded (run DKMS install first)"
+    modprobe hp-omen-core 2>/dev/null || warn "hp-omen-core module could not be loaded (run DKMS install first)"
+
     # Enable and start daemon
     systemctl daemon-reload
     systemctl enable hp-manager.service
@@ -235,6 +280,10 @@ rm -f /etc/dbus-1/system.d/com.yyl.hpmanager.conf
 rm -f /usr/share/polkit-1/actions/com.yyl.hpmanager.policy
 rm -f /usr/share/applications/com.yyl.hpmanager.desktop
 rm -f /usr/share/icons/hicolor/48x48/apps/hp_logo.png
+rm -f /etc/udev/rules.d/90-hp-omen-key.rules
+rm -f /usr/lib/systemd/user/hp-omen-key.service
+rm -f /usr/libexec/hp-manager/omen-key-listener.sh
+rm -f /etc/modprobe.d/hp-omen-core.conf
 systemctl daemon-reload
 echo "Kaldırma işlemi tamamlandı."
 UNINSTALLER

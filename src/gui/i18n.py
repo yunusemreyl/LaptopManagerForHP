@@ -77,6 +77,8 @@ TRANSLATIONS = {
         "heroic_desc": "Epic Games ve GOG istemcisi",
         "mangohud_desc": "Vulkan/OpenGL performans overlay'i",
         "gamemode_desc": "Feral Interactive oyun optimizatörü",
+        # Temperature unit
+        "temp_unit": "Sıcaklık Birimi", "celsius": "Celsius (°C)", "fahrenheit": "Fahrenheit (°F)",
     },
     "en": {
         # Nav
@@ -147,6 +149,8 @@ TRANSLATIONS = {
         "heroic_desc": "Epic Games and GOG client",
         "mangohud_desc": "Vulkan/OpenGL performance overlay",
         "gamemode_desc": "Feral Interactive game optimizer",
+        # Temperature unit
+        "temp_unit": "Temperature Unit", "celsius": "Celsius (°C)", "fahrenheit": "Fahrenheit (°F)",
     },
 }
 

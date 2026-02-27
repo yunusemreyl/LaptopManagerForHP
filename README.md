@@ -1,16 +1,18 @@
-# HP Laptop Manager (Linux) v4.0
-### The Missing Control Center for HP Omen & Victus Laptops on Linux
-
-![Logo](images/hp_logo.png)
+# HP Laptop Manager (Linux) v4.5
+<p align="center">
+  <img src="images/hp_logo.png" alt="Logo" width="250">
+</p>
 
 ## 📖 About The Project
 **HP Laptop Manager** is a native Linux application designed to unlock the full potential of HP Omen and Victus series laptops. It serves as an open-source alternative to the official OMEN Gaming Hub, providing essential controls in a modern, user-friendly interface.
 
-**New in v4.0:**
-- ✨ **Completely Redesigned UI**: Built with GTK4 and LibAdwaita for a native GNOME look.
+**New in v4.5:**
+- ✨ **Unified Kernel Driver**: `hp-omen-core` companion driver with DKMS for out-of-the-box fan and RGB support without conflicts.
+- ⌨️ **Omen Key Support**: Pressing the physical Omen Key natively opens the manager GUI via lightweight input listening.
+- 📝 **TOML Configuration**: Modern config management with automatic migration from older JSON settings.
 - 🌍 **Localization**: Full support for English and Turkish languages (auto-detected).
 - 🌪️ **Advanced Fan Control**: Standard (Software Curve), Max, and Custom curve editor.
-- 🎨 **RGB Lighting**: 4-Zone keyboard control with effects (Static, Breathing, Wave, Cycle).
+- 🎨 **RGB Lighting Control**: 4-Zone keyboard control with upgraded Breathing effect (smooth 20%-100% oscillation), Static, Wave, and Cycle effects.
 - ⚡ **Performance Modes**: Quickly switch between Power Saver, Balanced, and Performance.
 - 🔧 **GPU MUX Switch**: Integrated support for hybrid/discrete graphics switching.
 
@@ -86,12 +88,12 @@ sudo ./uninstall.sh
   <img src="screenshots/fan_control.png" alt="Fan Control" width="45%">
 </p>
 <p align="center">
-  <img src="screenshots/fan_curve.png" alt="Fan Curve" width="45%">
-  <img src="screenshots/lighting.png" alt="Lighting" width="45%">
+  <img src="screenshots/settings.png" alt="Settings" width="45%">
+  <img src="screenshots/light.png" alt="Lighting" width="45%">
 </p>
 <p align="center">
-  <img src="screenshots/mux.png" alt="MUX Switch" width="45%">
-  <img src="screenshots/tools.png" alt="Tools" width="45%">
+  <img src="screenshots/muxpage.png" alt="MUX Switch" width="45%">
+  <img src="screenshots/toolspage.png" alt="Tools" width="45%">
 </p>
 
 ## 👨‍💻 Credits & Acknowledgments

@@ -86,11 +86,19 @@ class LightingPage(Gtk.Box):
 
             self.dir_dd.set_selected(0 if self.direction == "ltr" else 1)
 
+            colors = st.get("colors", ["FF0000"] * 4)
+            for i in range(4):
+                c = Gdk.RGBA()
+                c.parse(f"#{colors[i]}")
+                self.zone_rgba[i] = c
+                self.kb_preview.set_zone_color(i, c.red, c.green, c.blue)
+
             self.kb_preview.power = self.power
             self.kb_preview.mode = self.mode
             self.kb_preview.speed = self.speed
             self.kb_preview.brightness = self.brightness
             self.kb_preview.direction = self.direction
+            self.kb_preview.queue_draw()
         except: pass
 
     def _build_ui(self):
@@ -228,8 +236,7 @@ class LightingPage(Gtk.Box):
                 self.kb_preview.set_zone_color(i, c.red, c.green, c.blue)
             if self.service:
                 try:
-                    for i in range(4):
-                        self.service.SetColor(i, hex_color)
+                    self.service.SetColor(4, hex_color)
                 except: pass
         else:
             self.zone_rgba[self.selected_zone] = c

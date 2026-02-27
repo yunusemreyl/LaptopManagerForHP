@@ -8,7 +8,7 @@ from gi.repository import GLib
 from pydbus import SystemBus
 
 # --- PATHS ---
-DRIVER_PATH = "/sys/devices/platform/hp-omen-rgb"
+DRIVER_PATH = "/sys/devices/platform/hp-omen-core"
 CONFIG_FILE = "/etc/hp-manager/state.json"
 
 # --- LOGLAMA ---
@@ -133,12 +133,6 @@ class FanController:
         if val is None:
             return False
 
-        # Workaround: Reset targets when switching to auto to Ensure EC takes over
-        if mode == "auto":
-            for i in range(1, self.fan_count + 1):
-                # Bazı BIOS/EC versiyonlarında target 0 yapılmazsa manuel modda takılı kalabiliyor
-                self._sysfs_write(f"fan{i}_target", 0)
-
         ok = self._sysfs_write("pwm1_enable", val)
         if ok:
             self.mode = mode
@@ -195,6 +189,17 @@ class RGBController:
     def write_all(self, hex_list):
         for i, hc in enumerate(hex_list[:4]):
             self.write_zone(i, hc)
+
+    def write_brightness(self, on):
+        if not self.available:
+            return
+        path = f"{DRIVER_PATH}/brightness"
+        try:
+            with open(path, "w") as f:
+                f.write("1" if on else "0")
+                f.flush()
+        except:
+            pass
 
 
 # ============================================================
@@ -321,10 +326,12 @@ class AnimationEngine(threading.Thread):
                 d = state.get("direction", "ltr")
 
             if not pwr:
+                self.rgb.write_brightness(False)
                 self.rgb.write_all(["000000"] * 4)
                 time.sleep(0.5)
                 continue
 
+            self.rgb.write_brightness(True)
             t = time.time()
             targets = []
 
@@ -332,7 +339,8 @@ class AnimationEngine(threading.Thread):
                 targets = [self._hex_to_rgb(c) for c in cols]
             elif mode == "breathing":
                 period = 8.0 - (spd * 0.06)
-                phase = (math.sin(2 * math.pi * t / period) + 1) / 2
+                phase_0_1 = (math.sin(2 * math.pi * t / period) + 1) / 2
+                phase = 0.1 + (0.9 * phase_0_1)
                 base = self._hex_to_rgb(cols[0])
                 targets = [(int(base[0] * phase), int(base[1] * phase), int(base[2] * phase))] * 4
             elif mode == "cycle":

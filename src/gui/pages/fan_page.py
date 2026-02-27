@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Fan & Power Control Page — v4.0 with i18n.
+Fan & Power Control Page — v4.5 with i18n.
 """
 import os, json, subprocess, shutil, glob, threading, time
 import gi
@@ -138,10 +138,13 @@ class FanPage(Gtk.Box):
         self.fan_mode = "standard" # Default to standard, will sync later
         self._curve_timer = None
         self._sensors_expanded = False
+        self.temp_unit = "C"  # "C" or "F"
         
         # Stability vars
         self.temp_history = []
         self.last_applied_rpm = {} # {fan_idx: rpm}
+        
+        self._block_sync = False  # Prevents UI reverting due to stale cached data
 
         self.monitor = SystemMonitor(lambda: self.service)
         self.monitor.start()
@@ -151,6 +154,15 @@ class FanPage(Gtk.Box):
 
     def set_service(self, service):
         self.service = service
+
+    def set_temp_unit(self, unit):
+        self.temp_unit = unit
+
+    def _format_temp(self, celsius):
+        """Format temperature value for display in the user's preferred unit."""
+        if self.temp_unit == "F":
+            return f"{int(celsius * 9 / 5 + 32)}°F"
+        return f"{int(celsius)}°C"
 
     def set_dark(self, is_dark):
         self.fan1_gauge.set_dark(is_dark)
@@ -345,6 +357,10 @@ class FanPage(Gtk.Box):
         # Initial mode set (will be updated by daemon sync)
         self.set_fan_mode_ui("standard")
 
+    def _unblock_sync(self):
+        self._block_sync = False
+        return False
+
     def set_fan_mode_ui(self, mode):
         self.fan_mode = mode
         if mode in self.fan_mode_buttons:
@@ -370,13 +386,17 @@ class FanPage(Gtk.Box):
             driver_lbl.set_size_request(100, -1)
             row.append(driver_lbl)
             row.append(Gtk.Label(label=s["label"], hexpand=True, xalign=0, css_classes=["stat-lbl"]))
-            temp_val = f"{s['temp']:.0f}°C"
+            temp_val = self._format_temp(s['temp'])
             temp_lbl = Gtk.Label(label=temp_val, xalign=1)
             temp_lbl.add_css_class("stat-big" if s["temp"] > 80 else "stat-lbl")
             row.append(temp_lbl)
             self.sensor_box.append(row)
 
     def _set_profile(self, profile):
+        if self._block_sync:
+            return  # Skip triggering if we are programmatically updating UI
+        self._block_sync = True
+        GLib.timeout_add(1500, self._unblock_sync)
         if self.service:
             try:
                 self.service.SetPowerProfile(profile)
@@ -386,22 +406,32 @@ class FanPage(Gtk.Box):
 
     def _on_fan_mode(self, mode):
         self.fan_mode = mode
-        
-        # "standard" uses software curve but hides editor
-        # "custom" uses software curve and shows editor
-        # "max" uses hardware max
-        
-        daemon_mode = "custom" if mode in ("standard", "custom") else "max"
-        
-        # Curve visibility and interactivity
+
+        # Standard = EC auto control (pwm1_enable=2, no RPM commands)
+        # Custom   = software-controlled fan curve (pwm1_enable=1)
+        # Max      = hardware max speed (pwm1_enable=0)
+
+        if mode == "standard":
+            daemon_mode = "auto"
+        elif mode == "custom":
+            daemon_mode = "custom"
+        else:
+            daemon_mode = "max"
+
+        # Curve visibility (only for custom)
         self.curve_card.set_visible(mode == "custom")
         self.fan_curve.set_interactive(mode == "custom")
-        
-        # Restore points based on mode
-        if mode == "standard":
-            self.fan_curve.set_points(self.default_points)
-        elif mode == "custom":
+
+        if mode == "custom":
             self.fan_curve.set_points(self.custom_points)
+
+        # Clear applied RPM cache when switching modes
+        self.last_applied_rpm = {}
+
+        if self._block_sync:
+            return # if programmatic UI update, do nothing
+        self._block_sync = True
+        GLib.timeout_add(1500, self._unblock_sync)
 
         if self.service:
             try:
@@ -410,8 +440,9 @@ class FanPage(Gtk.Box):
                 self.fan_mode_status.set_label(f"{T('mode')}: {labels.get(mode, mode)}")
             except Exception as e:
                 self.fan_mode_status.set_label(f"{T('error')}: {e}")
-                
-        if mode in ("standard", "custom"):
+
+        # Only apply fan curve in custom mode (standard delegates to EC)
+        if mode == "custom":
             self._apply_fan_curve()
 
     def _on_curve_changed(self, points):
@@ -427,65 +458,38 @@ class FanPage(Gtk.Box):
         return False
 
     def _apply_fan_curve(self):
-        # Only apply in software control modes
-        if self.fan_mode not in ("standard", "custom"):
+        """Apply fan curve — only used in 'custom' mode."""
+        if self.fan_mode != "custom":
             return
-            
+
         if not self.temp_history:
             return
 
-        # Use average temp for stability
         avg_temp = sum(self.temp_history) / len(self.temp_history)
-        
-        # Calculate target percentage
-        fan_pct = 0
-        if self.fan_mode == "standard":
-            # Stepped logic (User request: "Dümdüz çizgi", Flat lines)
-            # < 48: 0
-            # 48 - 58: 2000 RPM (~35%)
-            # 58 - 70: 3500 RPM (~60%)
-            # 70 - 78: 4200 RPM (~72%)
-            # 78 - 85: 4200 RPM (72%) (Assuming flat until 85)
-            # >= 85: 100%
-            if avg_temp < 48:
-                fan_pct = 0
-            elif avg_temp < 58:
-                fan_pct = 35 # ~2000 RPM
-            elif avg_temp < 70:
-                fan_pct = 60 # ~3500 RPM
-            elif avg_temp < 85:
-                fan_pct = 72 # ~4200 RPM, keeps flat till 85
-            else:
-                fan_pct = 100
-        else:
-            # Custom mode: Use curve widget interpolation
-            fan_pct = self.fan_curve.get_fan_pct_for_temp(avg_temp)
-        
+        fan_pct = self.fan_curve.get_fan_pct_for_temp(avg_temp)
+
         if self.service:
             try:
-                # We need max rpm to calculate target
-                # We can cache this or get from monitor data
                 data = self.monitor.get_data()
                 info = data.get("fan_info", {})
                 fans = info.get("fans", {})
-                
+
                 for fn, fd in fans.items():
                     max_rpm = fd.get("max", 5800)
-                    if max_rpm <= 0: max_rpm = 5800
-                    
+                    if max_rpm <= 0:
+                        max_rpm = 5800
+
                     target_rpm = int(max_rpm * fan_pct / 100)
-                    
-                    # Hysteresis: Don't change if difference is small (< 300 RPM)
-                    # unless we are at very low or very high temps
+
+                    # Hysteresis: skip if RPM change < 300
                     last = self.last_applied_rpm.get(fn, -1)
                     if last >= 0 and abs(target_rpm - last) < 300:
                         continue
-                        
+
                     self.service.SetFanTarget(int(fn), target_rpm)
                     self.last_applied_rpm[fn] = target_rpm
             except Exception as e:
                 print(f"Fan control error: {e}")
-                pass
 
     def _refresh(self):
         data = self.monitor.get_data()
@@ -502,20 +506,21 @@ class FanPage(Gtk.Box):
         # Draw current temp marker on curve
         self.fan_curve.set_current_temp(cpu_t)
         
-        self.cpu_label.set_label(f"{int(cpu_t)}°C")
-        self.gpu_label.set_label(f"{int(gpu_t)}°C")
+        self.cpu_label.set_label(self._format_temp(cpu_t))
+        self.gpu_label.set_label(self._format_temp(gpu_t))
 
-        if self.fan_mode in ("standard", "custom"):
+        if self.fan_mode == "custom":
             self._apply_fan_curve()
             
         # Sync Power Profile UI
-        active_profile = power_profile.get("profile", "")
-        if active_profile and active_profile in self.profile_buttons:
+        active_profile = power_profile.get("active", "")
+        if active_profile and active_profile in self.profile_buttons and not self._block_sync:
              btn = self.profile_buttons[active_profile]
              if not btn.get_active():
-                 # Set active, which will trigger the handler and reassure the daemon
-                 # This also visually updates the UI
+                 # Temporarily block sync so we don't send the command back to daemon
+                 self._block_sync = True
                  btn.set_active(True)
+                 self._block_sync = False
         
         if active_profile:
              self.pp_status.set_label(f"{T('active_profile')}: {active_profile}")
@@ -527,22 +532,13 @@ class FanPage(Gtk.Box):
             daemon_mode = fan_info.get("mode", "auto")
             
             # Map daemon modes to UI modes
-            target_ui_mode = self.fan_mode
-            
-            if daemon_mode == "auto":
-                target_ui_mode = "standard"
-                if self.fan_mode != "standard":
-                     self._on_fan_mode("standard") 
-            elif daemon_mode == "max":
-                target_ui_mode = "max"
-            elif daemon_mode == "custom":
-                if self.fan_mode not in ("standard", "custom"):
-                    target_ui_mode = "standard"
-            
-            if target_ui_mode != self.fan_mode:
-                self.fan_mode = target_ui_mode
-                if target_ui_mode in self.fan_mode_buttons:
-                     self.fan_mode_buttons[target_ui_mode].set_active(True)
+            if not self._block_sync:
+                if daemon_mode == "auto" and self.fan_mode != "standard":
+                    self._block_sync = True; self.set_fan_mode_ui("standard"); self._block_sync = False
+                elif daemon_mode == "max" and self.fan_mode != "max":
+                    self._block_sync = True; self.set_fan_mode_ui("max"); self._block_sync = False
+                elif daemon_mode == "custom" and self.fan_mode != "custom":
+                    self._block_sync = True; self.set_fan_mode_ui("custom"); self._block_sync = False
             
             # Update gauges
             fans = fan_info.get("fans", {})

@@ -4,6 +4,10 @@ HP Laptop Manager - Main Window
 Sidebar navigation ile 5 sekme + ayarlar.
 """
 import sys, os, json
+try:
+    import tomllib  # Python 3.11+
+except ImportError:
+    import tomli as tomllib  # fallback
 import gi
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
@@ -39,8 +43,9 @@ from pages.lighting_page import LightingPage
 from pages.mux_page import MUXPage
 from pages.settings_page import SettingsPage
 
-APP_VERSION = "4.0"
-CONFIG_FILE = os.path.expanduser("~/.config/hp-manager.json")
+APP_VERSION = "4.5"
+CONFIG_FILE = os.path.expanduser("~/.config/hp-manager.toml")
+CONFIG_FILE_JSON = os.path.expanduser("~/.config/hp-manager.json")
 
 # ── TRANSLATIONS (centralized in i18n.py to avoid __main__ double-import) ──
 from i18n import T, set_lang, get_lang
@@ -61,6 +66,7 @@ class HPManagerWindow(Gtk.ApplicationWindow):
         self.set_icon_name("hp_logo")
 
         self.app_theme = "dark"
+        self.temp_unit = "C"
         self.service = None
         self.ready = False
         self._rebuilding = False
@@ -73,16 +79,28 @@ class HPManagerWindow(Gtk.ApplicationWindow):
     def _load_config(self):
         try:
             if os.path.exists(CONFIG_FILE):
-                data = json.load(open(CONFIG_FILE))
+                with open(CONFIG_FILE, "rb") as f:
+                    data = tomllib.load(f)
                 self.app_theme = data.get("theme", "dark")
+                self.temp_unit = data.get("temp_unit", "C")
                 set_lang(data.get("lang", "tr"))
+            elif os.path.exists(CONFIG_FILE_JSON):
+                # Auto-migrate from old JSON config
+                data = json.load(open(CONFIG_FILE_JSON))
+                self.app_theme = data.get("theme", "dark")
+                self.temp_unit = data.get("temp_unit", "C")
+                set_lang(data.get("lang", "tr"))
+                self._save_config()  # write TOML
         except:
             pass
 
     def _save_config(self):
         try:
             os.makedirs(os.path.dirname(CONFIG_FILE), exist_ok=True)
-            json.dump({"theme": self.app_theme, "lang": get_lang()}, open(CONFIG_FILE, "w"))
+            with open(CONFIG_FILE, "w") as f:
+                f.write(f'theme = "{self.app_theme}"\n')
+                f.write(f'lang = "{get_lang()}"\n')
+                f.write(f'temp_unit = "{self.temp_unit}"\n')
         except:
             pass
 
@@ -636,7 +654,8 @@ class HPManagerWindow(Gtk.ApplicationWindow):
         self.mux_page = MUXPage(service=self.service)
         self.settings_page = SettingsPage(
             on_theme_change=self._on_theme_change,
-            on_lang_change=self._on_lang_change
+            on_lang_change=self._on_lang_change,
+            on_temp_unit_change=self._on_temp_unit_change
         )
 
         self.stack.add_named(self.games_page, "games")
@@ -648,11 +667,13 @@ class HPManagerWindow(Gtk.ApplicationWindow):
 
         # Sync initial theme to gauges
         self.fan_page.set_dark(self.app_theme == "dark")
+        self.fan_page.set_temp_unit(self.temp_unit)
 
         # Sync settings dropdowns to saved config
         self._rebuilding = True
         self.settings_page.set_theme_index(0 if self.app_theme == "dark" else 1)
         self.settings_page.set_lang_index(0 if get_lang() == "tr" else 1)
+        self.settings_page.set_temp_unit_index(0 if self.temp_unit == "C" else 1)
         self._rebuilding = False
 
         # Select first page
@@ -738,6 +759,14 @@ class HPManagerWindow(Gtk.ApplicationWindow):
         # while still inside the dropdown's signal handler
         GLib.idle_add(self._rebuild_pages)
 
+    def _on_temp_unit_change(self, unit):
+        if self._rebuilding:
+            return
+        self.temp_unit = unit
+        self._save_config()
+        if hasattr(self, 'fan_page'):
+            self.fan_page.set_temp_unit(unit)
+
     def _rebuild_pages(self):
         """Destroy and recreate all pages so T() picks up the new language."""
         self._rebuilding = True
@@ -764,7 +793,8 @@ class HPManagerWindow(Gtk.ApplicationWindow):
             self.mux_page = MUXPage(service=self.service)
             self.settings_page = SettingsPage(
                 on_theme_change=self._on_theme_change,
-                on_lang_change=self._on_lang_change
+                on_lang_change=self._on_lang_change,
+                on_temp_unit_change=self._on_temp_unit_change
             )
 
             self.stack.add_named(self.games_page, "games")
@@ -774,12 +804,14 @@ class HPManagerWindow(Gtk.ApplicationWindow):
             self.stack.add_named(self.mux_page, "mux")
             self.stack.add_named(self.settings_page, "settings")
 
-            # Restore theme state
+            # Restore theme + temp_unit state
             self.fan_page.set_dark(self.app_theme == "dark")
+            self.fan_page.set_temp_unit(self.temp_unit)
 
             # Restore settings dropdowns
             self.settings_page.set_theme_index(0 if self.app_theme == "dark" else 1)
             self.settings_page.set_lang_index(0 if get_lang() == "tr" else 1)
+            self.settings_page.set_temp_unit_index(0 if self.temp_unit == "C" else 1)
 
             # Restore page
             self._navigate(current_page or "settings")
@@ -811,7 +843,7 @@ def main():
     print("Initializing Application...", flush=True)
     # Use a distinct ID for the GUI to avoid conflict with the daemon service name
     # and use NON_UNIQUE to ensure it always launches a new instance for now
-    app = HPManagerApp(application_id="com.yyl.hpmanager.gui", flags=Gio.ApplicationFlags.NON_UNIQUE)
+    app = HPManagerApp(application_id="com.yyl.hpmanager.gui", flags=Gio.ApplicationFlags.FLAGS_NONE)
     exit_status = app.run(sys.argv)
     sys.exit(exit_status)
 

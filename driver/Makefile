@@ -1,6 +1,7 @@
 
-# Module name
+# Module names — both built together
 obj-m += hp-wmi.o
+obj-m += hp-omen-core.o
 
 # Kernel build directory
 KDIR := /lib/modules/$(shell uname -r)/build
@@ -34,6 +35,7 @@ install-arch:
 
 uninstall:
 	rm -f /lib/modules/$(shell uname -r)/extra/hp-wmi.ko
+	rm -f /lib/modules/$(shell uname -r)/extra/hp-omen-core.ko
 	depmod -a
 
 uninstall-dkms:

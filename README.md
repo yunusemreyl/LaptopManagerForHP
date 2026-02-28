@@ -1,4 +1,4 @@
-** HP Laptop Manager (Linux) v4.6**
+# HP Laptop Manager (Linux) v4.6 #
 <p align="center">
   <img src="images/hplogolight.png" alt="Logo" width="250">
 </p>

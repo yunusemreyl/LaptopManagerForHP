@@ -22,10 +22,10 @@ PROJ_SRC = os.path.abspath(os.path.join(BASE_DIR, "..", ".."))
 # Check relative to installed location (1 level up -> /usr/share/hp-manager)
 PROJ_INSTALLED = os.path.abspath(os.path.join(BASE_DIR, ".."))
 
-if os.path.exists(os.path.join(PROJ_SRC, "images", "hp_logo.png")):
+if os.path.exists(os.path.join(PROJ_SRC, "images", "hplogodark.png")):
     IMAGES_DIR = os.path.join(PROJ_SRC, "images")
     PROJECT_DIR = PROJ_SRC
-elif os.path.exists(os.path.join(PROJ_INSTALLED, "images", "hp_logo.png")):
+elif os.path.exists(os.path.join(PROJ_INSTALLED, "images", "hplogodark.png")):
     IMAGES_DIR = os.path.join(PROJ_INSTALLED, "images")
     PROJECT_DIR = PROJ_INSTALLED
 else:
@@ -42,8 +42,9 @@ from pages.fan_page import FanPage
 from pages.lighting_page import LightingPage
 from pages.mux_page import MUXPage
 from pages.settings_page import SettingsPage
+from pages.dashboard_page import DashboardPage
 
-APP_VERSION = "4.5"
+APP_VERSION = "4.6"
 CONFIG_FILE = os.path.expanduser("~/.config/hp-manager.toml")
 CONFIG_FILE_JSON = os.path.expanduser("~/.config/hp-manager.json")
 
@@ -72,6 +73,15 @@ class HPManagerWindow(Gtk.ApplicationWindow):
         self._rebuilding = False
 
         self._load_config()
+        
+        sm = Adw.StyleManager.get_default()
+        if self.app_theme == "dark":
+            sm.set_color_scheme(Adw.ColorScheme.FORCE_DARK)
+        elif self.app_theme == "light":
+            sm.set_color_scheme(Adw.ColorScheme.FORCE_LIGHT)
+        else:
+            sm.set_color_scheme(Adw.ColorScheme.DEFAULT)
+            
         self._apply_css()
         self._build_ui()
         self._connect_daemon()
@@ -86,12 +96,13 @@ class HPManagerWindow(Gtk.ApplicationWindow):
                 set_lang(data.get("lang", "tr"))
             elif os.path.exists(CONFIG_FILE_JSON):
                 # Auto-migrate from old JSON config
-                data = json.load(open(CONFIG_FILE_JSON))
+                with open(CONFIG_FILE_JSON) as f:
+                    data = json.load(f)
                 self.app_theme = data.get("theme", "dark")
                 self.temp_unit = data.get("temp_unit", "C")
                 set_lang(data.get("lang", "tr"))
                 self._save_config()  # write TOML
-        except:
+        except Exception:
             pass
 
     def _save_config(self):
@@ -101,7 +112,7 @@ class HPManagerWindow(Gtk.ApplicationWindow):
                 f.write(f'theme = "{self.app_theme}"\n')
                 f.write(f'lang = "{get_lang()}"\n')
                 f.write(f'temp_unit = "{self.temp_unit}"\n')
-        except:
+        except Exception:
             pass
 
     def _get_system_accent(self):
@@ -113,7 +124,7 @@ class HPManagerWindow(Gtk.ApplicationWindow):
             r, g, b = int(rgba.red * 255), int(rgba.green * 255), int(rgba.blue * 255)
             if r or g or b:
                 return f"#{r:02X}{g:02X}{b:02X}"
-        except:
+        except Exception:
             pass
         # Fallback: default blue accent
         return "#3584e4"
@@ -151,24 +162,31 @@ class HPManagerWindow(Gtk.ApplicationWindow):
         accent_border_hover = f"rgba({ar}, {ag}, {ab}, 0.3)"
         accent_dark = self._darken(accent, 60)
 
-        if self.app_theme == "dark":
+        sm = Adw.StyleManager.get_default()
+        actual_theme = "dark" if self.app_theme == "dark" else ("light" if self.app_theme == "light" else ("dark" if sm.get_dark() else "light"))
+
+        if actual_theme == "dark":
             bg = "#1e1e24"
-            sidebar_bg = "#16161c"
-            card_bg = "#2a2a32"
-            card_border = "rgba(255,255,255,0.08)"
+            sidebar_bg = "rgba(0,0,0,0.45)"
+            card_bg = "rgba(0,0,0,0.3)"
+            card_border = "rgba(255,255,255,0.06)"
+            sep_color = "rgba(255,255,255,0.08)"
             fg = "#ffffff"
             fg_dim = "#cccccc"
             fg_very_dim = "#999999"
             input_bg = "rgba(255,255,255,0.08)"
+            clean_ram_color = "inherit"
         else:
             bg = "#f0f0f4"
-            sidebar_bg = "#e8e8ee"
-            card_bg = "#ffffff"
-            card_border = "rgba(0,0,0,0.12)"
+            sidebar_bg = "rgba(255,255,255,0.5)"
+            card_bg = "rgba(255,255,255,0.65)"
+            card_border = "rgba(0,0,0,0.08)"
+            sep_color = "rgba(0,0,0,0.12)"
             fg = "#121212"
             fg_dim = "#444444"
             fg_very_dim = "#666666"
             input_bg = "rgba(0,0,0,0.06)"
+            clean_ram_color = "#000000"
             accent = self._darken(accent, 20)
             accent_hover = self._darken(accent, 10)
             ar, ag, ab = self._hex_to_rgb(accent)
@@ -195,12 +213,61 @@ class HPManagerWindow(Gtk.ApplicationWindow):
 
         css = f"""
         /* ── Window ── */
-        window {{ background-color: {bg}; color: {fg}; }}
+        window {{
+            background-color: {bg};
+            color: {fg};
+        }}
+
+        /* ── Global text color — override Adw defaults ── */
+        label {{
+            color: {fg};
+        }}
+        .heading {{
+            color: {fg};
+        }}
+        .title-1, .title-2, .title-3, .title-4 {{
+            color: {fg};
+        }}
+        .dim-label {{
+            color: {fg_dim};
+        }}
+        entry {{
+            color: {fg};
+        }}
+        image {{
+            color: {fg_dim};
+        }}
+        button label {{
+            color: inherit;
+        }}
+        .suggested-action {{
+            background: {accent};
+            color: white;
+        }}
+        .suggested-action label {{
+            color: white;
+        }}
+        .destructive-action {{
+            background: #e33;
+            color: white;
+        }}
+        .destructive-action label {{
+            color: white;
+        }}
+        .clean-ram-action label {{
+            color: {clean_ram_color};
+            font-weight: 700;
+        }}
 
         /* ── Sidebar ── */
         .sidebar {{
             background-color: {sidebar_bg};
-            border-right: 1px solid {card_border};
+            border-right: 1px solid {sep_color};
+        }}
+        
+        separator {{
+            background: {sep_color};
+            min-width: 1px; min-height: 1px;
         }}
         .sidebar-logo {{
             padding: 15px 0 10px 0;
@@ -208,9 +275,10 @@ class HPManagerWindow(Gtk.ApplicationWindow):
         .sidebar-logo image {{
             opacity: 0.9;
         }}
+        .logo-img-light {{
+            -gtk-icon-filter: brightness(0);
+        }}
         .logo-img {{
-            max-width: 48px;
-            max-height: 48px;
             margin-bottom: 4px;
         }}
 
@@ -274,13 +342,15 @@ class HPManagerWindow(Gtk.ApplicationWindow):
             color: {fg_dim};
             font-weight: 500;
         }}
-
-        /* ── Cards ── */
-        .card {{
-            background-color: {card_bg};
-            border-radius: 16px;
-            border: 1px solid {card_border};
-            padding: 22px;
+        .stat-rpm {{
+            font-size: 16px;
+            color: {fg};
+            font-weight: 700;
+        }}
+        .fan-title {{
+            font-size: 14px;
+            color: {fg};
+            font-weight: 600;
         }}
 
         /* ── Buttons ── */
@@ -323,7 +393,9 @@ class HPManagerWindow(Gtk.ApplicationWindow):
         .mux-btn {{
             background: {input_bg};
             border: 2px solid {card_border};
-            border-radius: 20px;
+            border-radius: 18px;
+            min-width: 140px;
+            min-height: 140px;
             transition: all 0.2s ease;
             color: {fg};
         }}
@@ -379,6 +451,15 @@ class HPManagerWindow(Gtk.ApplicationWindow):
             font-size: 11px;
             color: {fg_dim};
         }}
+        .temp-circle {{
+            background-color: {card_bg};
+            border: 2px solid {accent};
+            border-radius: 50%;
+            padding: 30px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.1);
+            min-width: 140px;
+            min-height: 140px;
+        }}
         .tool-status {{
             font-size: 12px;
             font-weight: 600;
@@ -414,6 +495,15 @@ class HPManagerWindow(Gtk.ApplicationWindow):
             border-color: {accent_border_hover};
             box-shadow: 0 4px 12px rgba(0,0,0,0.15);
         }}
+
+        .card {{
+            background-color: {card_bg};
+            border: 1px solid {card_border};
+            border-radius: 20px;
+            padding: 24px;
+            box-shadow: 0 8px 16px rgba(0,0,0,0.08);
+        }}
+
         .game-icon-box {{
             background: {accent_glow};
             border-radius: 10px;
@@ -567,6 +657,23 @@ class HPManagerWindow(Gtk.ApplicationWindow):
             font-weight: 600;
         }}
 
+        /* ── Dashboard pill rows ── */
+        .pill-row {{
+            background: {accent_dim};
+            border-radius: 14px;
+            padding: 8px 12px;
+        }}
+        .pill-frame {{
+            border-radius: 12px;
+            border: 1px solid alpha({fg}, 0.15);
+            transition: all 0.2s ease;
+        }}
+        .pill-frame:hover {{
+            background: {accent_dim};
+            border-color: {accent_hover};
+            box-shadow: 0 0 8px {accent_glow};
+        }}
+
         {presets_css}
         """
 
@@ -590,34 +697,28 @@ class HPManagerWindow(Gtk.ApplicationWindow):
         # Logo at top
         logo_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, halign=Gtk.Align.CENTER)
         logo_box.add_css_class("sidebar-logo")
-        logo_path = os.path.join(IMAGES_DIR, "hp_logo.png")
-        if os.path.exists(logo_path):
-            from gi.repository import GdkPixbuf
-            # Load larger for high DPI
-            pixbuf = GdkPixbuf.Pixbuf.new_from_file_at_scale(logo_path, 48, 48, True)
-            logo_icon = Gtk.Image.new_from_pixbuf(pixbuf)
-            logo_icon.set_pixel_size(48)
-            logo_icon.add_css_class("logo-img")
-        else:
-            logo_icon = Gtk.Image.new_from_icon_name("computer-symbolic")
-            logo_icon.set_pixel_size(48)
-        logo_box.append(logo_icon)
-        sidebar.append(logo_box)
 
-        sidebar.append(Gtk.Separator())
+        self.logo_icon = Gtk.Image()
+        self.logo_icon.set_pixel_size(48)
+        self.logo_icon.add_css_class("logo-img")
+        
+        self._update_logo()
+        
+        logo_box.append(self.logo_icon)
+        sidebar.append(logo_box)
 
         # Navigation items
         self.stack = Gtk.Stack()
-        self.stack.set_transition_type(Gtk.StackTransitionType.CROSSFADE)
+        self.stack.set_transition_type(Gtk.StackTransitionType.SLIDE_UP_DOWN)
         self.nav_labels = {}  # track nav labels for language update
         self.stack.set_transition_duration(200)
 
         self.nav_buttons = {}
 
         nav_items = [
-            ("games", "Oyunlar", "applications-games-symbolic"),
-            ("fan", "Fan", "weather-tornado-symbolic"),
-            ("lighting", "Aydınlatma", "weather-clear-night-symbolic"),
+            ("dashboard", T("dashboard"), "view-grid-symbolic"),
+            ("fan", T("fan"), "weather-tornado-symbolic"),
+            ("lighting", T("lighting"), "weather-clear-night-symbolic"),
             ("mux", "MUX", "video-display-symbolic"),
         ]
 
@@ -630,12 +731,16 @@ class HPManagerWindow(Gtk.ApplicationWindow):
         # Spacer
         sidebar.append(Gtk.Label(vexpand=True))
 
+        # Games at bottom
+        games_btn = self._make_nav_button("games", T("games"), "applications-games-symbolic")
+        sidebar.append(games_btn)
+
         # Tools at bottom (above settings)
-        tools_btn = self._make_nav_button("tools", "Araçlar", "emblem-system-symbolic")
+        tools_btn = self._make_nav_button("tools", T("tools"), "applications-utilities-symbolic")
         sidebar.append(tools_btn)
 
         # Settings at bottom
-        settings_btn = self._make_nav_button("settings", "Ayarlar", "emblem-system-symbolic")
+        settings_btn = self._make_nav_button("settings", T("settings"), "emblem-system-symbolic")
         sidebar.append(settings_btn)
         sidebar.append(Gtk.Box(margin_bottom=10))
 
@@ -647,6 +752,7 @@ class HPManagerWindow(Gtk.ApplicationWindow):
         main_box.append(content)
 
         # ── Create pages ──
+        self.dashboard_page = DashboardPage(service=self.service, on_navigate=self._navigate)
         self.games_page = GamesPage()
         self.tools_page = ToolsPage(service=self.service)
         self.fan_page = FanPage(service=self.service)
@@ -658,6 +764,7 @@ class HPManagerWindow(Gtk.ApplicationWindow):
             on_temp_unit_change=self._on_temp_unit_change
         )
 
+        self.stack.add_named(self.dashboard_page, "dashboard")
         self.stack.add_named(self.games_page, "games")
         self.stack.add_named(self.tools_page, "tools")
         self.stack.add_named(self.fan_page, "fan")
@@ -671,13 +778,13 @@ class HPManagerWindow(Gtk.ApplicationWindow):
 
         # Sync settings dropdowns to saved config
         self._rebuilding = True
-        self.settings_page.set_theme_index(0 if self.app_theme == "dark" else 1)
+        self.settings_page.set_theme_index(0 if self.app_theme == "dark" else 1 if self.app_theme == "light" else 2)
         self.settings_page.set_lang_index(0 if get_lang() == "tr" else 1)
         self.settings_page.set_temp_unit_index(0 if self.temp_unit == "C" else 1)
         self._rebuilding = False
 
         # Select first page
-        self._navigate("games")
+        self._navigate("dashboard")
 
     def _make_nav_button(self, page_id, label, icon_name):
         btn = Gtk.Button()
@@ -712,6 +819,23 @@ class HPManagerWindow(Gtk.ApplicationWindow):
                 if "active" in btn.get_css_classes():
                     btn.remove_css_class("active")
 
+    def _update_logo(self):
+        from gi.repository import Adw, GdkPixbuf
+        import os
+        
+        sm = Adw.StyleManager.get_default()
+        is_light = self.app_theme == "light" or (self.app_theme == "system" and not sm.get_dark())
+        
+        logo_filename = "hplogodark.png" if is_light else "hplogolight.png"
+        logo_path = os.path.join(IMAGES_DIR, logo_filename)
+        
+        if hasattr(self, 'logo_icon'):
+            if os.path.exists(logo_path):
+                pixbuf = GdkPixbuf.Pixbuf.new_from_file_at_scale(logo_path, 48, 48, True)
+                self.logo_icon.set_from_pixbuf(pixbuf)
+            else:
+                self.logo_icon.set_from_icon_name("computer-symbolic")
+
     def _connect_daemon(self):
         try:
             from pydbus import SystemBus
@@ -720,6 +844,7 @@ class HPManagerWindow(Gtk.ApplicationWindow):
             self.ready = True
 
             # Pass service to pages
+            self.dashboard_page.set_service(self.service)
             self.fan_page.set_service(self.service)
             self.lighting_page.set_service(self.service)
             self.mux_page.set_service(self.service)
@@ -739,6 +864,8 @@ class HPManagerWindow(Gtk.ApplicationWindow):
         is_dark = theme == "dark"
         if hasattr(self, 'fan_page'):
             self.fan_page.set_dark(is_dark)
+        # Update logo dynamically
+        self._update_logo()
 
     def _on_lang_change(self, lang):
         if self._rebuilding:
@@ -749,6 +876,7 @@ class HPManagerWindow(Gtk.ApplicationWindow):
         self._save_config()
         # Live-update nav labels
         label_map = {
+            "dashboard": T("dashboard"),
             "games": T("games"), "fan": T("fan"), "lighting": T("lighting"),
             "mux": T("mux"), "tools": T("tools"), "settings": T("settings"),
         }
@@ -774,18 +902,26 @@ class HPManagerWindow(Gtk.ApplicationWindow):
             current_page = self.stack.get_visible_child_name()
 
             # Cleanup old pages
+            if hasattr(self, 'dashboard_page'):
+                self.dashboard_page.cleanup()
             if hasattr(self, 'fan_page'):
                 self.fan_page.cleanup()
             if hasattr(self, 'lighting_page'):
                 self.lighting_page.cleanup()
 
             # Remove old pages from stack
-            for name in ("games", "tools", "fan", "lighting", "mux", "settings"):
+            for name in ("dashboard", "games", "tools", "fan", "lighting", "mux", "settings"):
                 child = self.stack.get_child_by_name(name)
                 if child:
                     self.stack.remove(child)
 
+            # Update sidebar nav labels
+            for page_id, lbl_widget in self.nav_labels.items():
+                key = page_id  # matches i18n key
+                lbl_widget.set_label(T(key) if key != "mux" else "MUX")
+
             # Recreate pages
+            self.dashboard_page = DashboardPage(service=self.service)
             self.games_page = GamesPage()
             self.tools_page = ToolsPage(service=self.service)
             self.fan_page = FanPage(service=self.service)
@@ -797,6 +933,7 @@ class HPManagerWindow(Gtk.ApplicationWindow):
                 on_temp_unit_change=self._on_temp_unit_change
             )
 
+            self.stack.add_named(self.dashboard_page, "dashboard")
             self.stack.add_named(self.games_page, "games")
             self.stack.add_named(self.tools_page, "tools")
             self.stack.add_named(self.fan_page, "fan")
@@ -809,22 +946,28 @@ class HPManagerWindow(Gtk.ApplicationWindow):
             self.fan_page.set_temp_unit(self.temp_unit)
 
             # Restore settings dropdowns
-            self.settings_page.set_theme_index(0 if self.app_theme == "dark" else 1)
+            self.settings_page.set_theme_index(0 if self.app_theme == "dark" else 1 if self.app_theme == "light" else 2)
             self.settings_page.set_lang_index(0 if get_lang() == "tr" else 1)
             self.settings_page.set_temp_unit_index(0 if self.temp_unit == "C" else 1)
 
             # Restore page
-            self._navigate(current_page or "settings")
+            self._navigate(current_page or "dashboard")
         finally:
             self._rebuilding = False
         return False  # Don't repeat GLib.idle_add
 
     def do_close_request(self):
         """Cleanup on close."""
+        if hasattr(self, 'dashboard_page'):
+            self.dashboard_page.cleanup()
         if hasattr(self, 'lighting_page'):
             self.lighting_page.cleanup()
         if hasattr(self, 'fan_page'):
             self.fan_page.cleanup()
+        try:
+            self.get_application().quit()
+        except:
+            pass
         return False
 
 

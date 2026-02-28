@@ -27,7 +27,7 @@ def _detect_distro():
                     distro_id = line.split("=", 1)[1].strip().strip('"').lower()
                 elif line.startswith("ID_LIKE="):
                     id_like = line.split("=", 1)[1].strip().strip('"').lower()
-    except:
+    except Exception:
         pass
 
     # Determine family
@@ -272,7 +272,7 @@ class ToolsPage(Gtk.Box):
                 )
                 if result.returncode == 0:
                     installed = True
-            except:
+            except Exception:
                 pass
 
         # Update UI on main thread
@@ -292,9 +292,10 @@ class ToolsPage(Gtk.Box):
             w["btn"].set_visible(True)
 
     def _check_all(self):
-        for tool in TOOLS:
-            t = threading.Thread(target=self._check_tool, args=(tool,), daemon=True)
-            t.start()
+        def worker():
+            for tool in TOOLS:
+                self._check_tool(tool)
+        threading.Thread(target=worker, daemon=True).start()
         return False
 
     def _install_tool(self, tool):
@@ -311,92 +312,57 @@ class ToolsPage(Gtk.Box):
             success = False
             method = ""
 
-            # Get package name for current distro
             pkg = tool.get("pkg", {}).get(DISTRO)
             flatpak_id = tool.get("flatpak_id")
             is_aur = tool.get("aur", False) and DISTRO == "arch"
 
-            # Strategy 1: Native package manager (preferred)
+            # 1. Native Package Manager (if defined and NOT an AUR package)
             if pkg and not is_aur:
-                success, method = self._try_native_install(pkg)
+                if DISTRO == "arch" and shutil.which("pacman"):
+                    try:
+                        subprocess.run(["pkexec", "pacman", "-S", "--noconfirm", pkg], check=True, capture_output=True, timeout=300)
+                        success, method = True, "pacman"
+                    except: pass
+                elif DISTRO == "fedora" and shutil.which("dnf"):
+                    try:
+                        subprocess.run(["pkexec", "dnf", "install", "-y", pkg], check=True, capture_output=True, timeout=300)
+                        success, method = True, "dnf"
+                    except: pass
+                elif DISTRO == "debian" and shutil.which("apt"):
+                    try:
+                        subprocess.run(["pkexec", "apt", "install", "-y", pkg], check=True, capture_output=True, timeout=300)
+                        success, method = True, "apt"
+                    except: pass
+                elif DISTRO == "suse" and shutil.which("zypper"):
+                    try:
+                        subprocess.run(["pkexec", "zypper", "install", "-y", pkg], check=True, capture_output=True, timeout=300)
+                        success, method = True, "zypper"
+                    except: pass
 
-            # Strategy 2: AUR (Arch only)
+            # 2. AUR (Arch only, if it is an AUR package)
             if not success and is_aur and pkg:
                 aur_helper = _has_aur_helper()
                 if aur_helper:
                     try:
-                        subprocess.run(
-                            [aur_helper, "-S", "--noconfirm", pkg],
-                            check=True, capture_output=True, timeout=600
-                        )
-                        success = True
-                        method = f"AUR ({aur_helper})"
-                    except:
-                        pass
+                        # AUR helpers shouldn't be run as root usually, but since the GUI runs as user, pkexec is tricky here. 
+                        # We use standard user run, asking for pw natively if the helper attempts it via sudo.
+                        subprocess.run([aur_helper, "-S", "--noconfirm", pkg], check=True, capture_output=True, timeout=600)
+                        success, method = True, f"AUR ({aur_helper})"
+                    except: pass
 
-            # Strategy 3: Flatpak (fallback / preferred for some distros)
+            # 3. Flatpak Fallback (if native fails or doesn't exist)
             if not success and flatpak_id and shutil.which("flatpak"):
                 try:
-                    # Ensure flathub is added
-                    subprocess.run(
-                        ["flatpak", "remote-add", "--if-not-exists", "flathub",
-                         "https://dl.flathub.org/repo/flathub.flatpakrepo"],
-                        capture_output=True, timeout=30
-                    )
-                    subprocess.run(
-                        ["flatpak", "install", "-y", "--noninteractive", "flathub", flatpak_id],
-                        check=True, capture_output=True, timeout=600
-                    )
-                    success = True
-                    method = "Flatpak"
-                except:
-                    pass
-
-            # Strategy 4: Try native as last resort (for distros where pkg was None)
-            if not success and not pkg and flatpak_id is None:
-                # Really last resort — try generic package name
-                generic_pkg = tool.get("pkg", {}).get("debian") or tool["id"]
-                success, method = self._try_native_install(generic_pkg)
+                    subprocess.run(["flatpak", "remote-add", "--if-not-exists", "flathub", "https://dl.flathub.org/repo/flathub.flatpakrepo"], capture_output=True, timeout=30)
+                    subprocess.run(["flatpak", "install", "-y", "--noninteractive", "flathub", flatpak_id], check=True, capture_output=True, timeout=600)
+                    success, method = True, "Flatpak"
+                except: pass
 
             GLib.idle_add(self._install_done, tool["id"], success, method)
 
         t = threading.Thread(target=do_install, daemon=True)
         t.start()
 
-    def _try_native_install(self, pkg_name):
-        """Try to install via the system's native package manager."""
-        pm_commands = {
-            "arch": ["pkexec", "pacman", "-S", "--noconfirm", pkg_name],
-            "fedora": ["pkexec", "dnf", "install", "-y", pkg_name],
-            "debian": ["pkexec", "apt", "install", "-y", pkg_name],
-            "suse": ["pkexec", "zypper", "install", "-y", pkg_name],
-        }
-
-        cmd = pm_commands.get(DISTRO)
-        if cmd:
-            try:
-                subprocess.run(cmd, check=True, capture_output=True, timeout=300)
-                return True, DISTRO
-            except:
-                pass
-
-        # Fallback: try all known managers
-        fallback_managers = [
-            ("pacman", ["pkexec", "pacman", "-S", "--noconfirm", pkg_name]),
-            ("apt", ["pkexec", "apt", "install", "-y", pkg_name]),
-            ("dnf", ["pkexec", "dnf", "install", "-y", pkg_name]),
-            ("zypper", ["pkexec", "zypper", "install", "-y", pkg_name]),
-        ]
-        for pm, cmd in fallback_managers:
-            if shutil.which(pm):
-                try:
-                    subprocess.run(cmd, check=True, capture_output=True, timeout=300)
-                    return True, pm
-                except:
-                    pass
-                break
-
-        return False, ""
 
     def _install_done(self, tool_id, success, method=""):
         w = self.tool_widgets.get(tool_id)

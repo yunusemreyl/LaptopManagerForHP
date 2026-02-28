@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Lighting Page - 4-zone RGB keyboard backlight control — i18n via T().
 Victus: single zone, Omen: 4 zones (auto-detected via DMI)."""
-import os, json, colorsys
+import os, json, colorsys, threading
 import gi
 gi.require_version('Gtk', '4.0')
 from gi.repository import Gtk, Gdk, GLib
@@ -29,7 +29,7 @@ def _detect_model_type():
                     return "victus"
                 if "omen" in name:
                     return "omen"
-        except: pass
+        except Exception: pass
     return "omen"
 
 
@@ -60,6 +60,18 @@ class LightingPage(Gtk.Box):
 
         self._build_ui()
         self._sync_state()
+        self.connect("map", self._on_map)
+        self.connect("unmap", self._on_unmap)
+
+    def _on_map(self, *args):
+        GLib.timeout_add(300, self._start_preview_anim)
+        
+    def _start_preview_anim(self):
+        self.kb_preview.resume_animation()
+        return False
+        
+    def _on_unmap(self, *args):
+        self.kb_preview.pause_animation()
 
     def set_service(self, service):
         self.service = service
@@ -68,8 +80,19 @@ class LightingPage(Gtk.Box):
     def _sync_state(self):
         if not self.service:
             return
+        
+        # Run DBus call in background to avoid freezing the UI transition
+        def _fetch():
+            try:
+                st = json.loads(self.service.GetState())
+                GLib.idle_add(self._apply_state, st)
+            except Exception:
+                pass
+        
+        threading.Thread(target=_fetch, daemon=True).start()
+
+    def _apply_state(self, st):
         try:
-            st = json.loads(self.service.GetState())
             self.power = st.get("power", True)
             self.mode = st.get("mode", "static")
             self.speed = st.get("speed", 50)
@@ -99,7 +122,8 @@ class LightingPage(Gtk.Box):
             self.kb_preview.brightness = self.brightness
             self.kb_preview.direction = self.direction
             self.kb_preview.queue_draw()
-        except: pass
+        except Exception: pass
+        return False
 
     def _build_ui(self):
         title = Gtk.Label(label=T("keyboard_lighting"), xalign=0)
@@ -111,7 +135,7 @@ class LightingPage(Gtk.Box):
         content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=20)
 
         # Keyboard Preview
-        preview_frame = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, halign=Gtk.Align.CENTER)
+        preview_frame = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         preview_frame.add_css_class("kb-frame")
         self.kb_preview = KeyboardPreview()
         preview_frame.append(self.kb_preview)
@@ -152,16 +176,42 @@ class LightingPage(Gtk.Box):
         row1.append(Gtk.Separator(orientation=Gtk.Orientation.VERTICAL))
 
         color_box = Gtk.Box(spacing=6, halign=Gtk.Align.CENTER)
+        
+        # We need a CSS provider to inject dynamic CSS for glows
+        self.preset_css_provider = Gtk.CssProvider()
+        Gtk.StyleContext.add_provider_for_display(
+            Gdk.Display.get_default(), 
+            self.preset_css_provider, 
+            Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+        )
+        
+        dyn_css = ""
         for i, hex_color in enumerate(PRESETS):
             btn = Gtk.Button()
-            btn.add_css_class(f"preset-{i}")
-            btn.set_size_request(28, 28)
+            css_class = f"neon-preset-{i}"
+            btn.add_css_class("color-preset-btn")
+            btn.add_css_class(css_class)
+            btn.set_size_request(32, 32)
             btn.connect("clicked", lambda w, c=hex_color: self._on_color(c))
             color_box.append(btn)
+            
+            # Dynamic CSS for the specific color glow
+            dyn_css += f"""
+            .{css_class} {{
+                background-color: {hex_color};
+                border-radius: 50%;
+                box-shadow: 0px 0px 8px {hex_color}, inset 0px 0px 2px rgba(255,255,255,0.4);
+            }}
+            .{css_class}:hover {{
+                box-shadow: 0px 0px 14px {hex_color}, inset 0px 0px 4px rgba(255,255,255,0.6);
+            }}
+            """
+            
+        self.preset_css_provider.load_from_data(dyn_css.encode('utf-8'))
 
         pick_btn = Gtk.Button(label="+")
         pick_btn.add_css_class("color-picker-btn")
-        pick_btn.set_size_request(28, 28)
+        pick_btn.set_size_request(32, 32)
         pick_btn.connect("clicked", self._open_picker)
         color_box.append(pick_btn)
         row1.append(color_box)
@@ -173,7 +223,7 @@ class LightingPage(Gtk.Box):
         grid = Gtk.Grid(column_spacing=30, row_spacing=15, halign=Gtk.Align.CENTER)
 
         grid.attach(Gtk.Label(label=T("effect"), xalign=1, css_classes=["section-title"]), 0, 0, 1, 1)
-        self.mode_dd = Gtk.DropDown(model=Gtk.StringList.new(["Static", "Breathing", "Wave", "Cycle"]))
+        self.mode_dd = Gtk.DropDown(model=Gtk.StringList.new([T("static_eff"), T("breathing"), T("wave"), T("cycle")]))
         self.mode_dd.connect("notify::selected", self._on_mode)
         grid.attach(self.mode_dd, 1, 0, 1, 1)
 
@@ -215,7 +265,7 @@ class LightingPage(Gtk.Box):
         if self.service:
             try:
                 self.service.SetGlobal(state, int(self.brightness_scale.get_value()), self.direction)
-            except: pass
+            except Exception: pass
 
     def _on_color(self, hex_color):
         c = Gdk.RGBA()
@@ -228,7 +278,7 @@ class LightingPage(Gtk.Box):
             self.kb_preview.mode = "static"
             if self.service:
                 try: self.service.SetMode("static", self.speed)
-                except: pass
+                except Exception: pass
 
         if self.num_zones == 1 or self.selected_zone == 4:
             for i in range(4):
@@ -237,13 +287,13 @@ class LightingPage(Gtk.Box):
             if self.service:
                 try:
                     self.service.SetColor(4, hex_color)
-                except: pass
+                except Exception: pass
         else:
             self.zone_rgba[self.selected_zone] = c
             self.kb_preview.set_zone_color(self.selected_zone, c.red, c.green, c.blue)
             if self.service:
                 try: self.service.SetColor(self.selected_zone, hex_color)
-                except: pass
+                except Exception: pass
         self.kb_preview.queue_draw()
 
     def _open_picker(self, btn):
@@ -255,7 +305,7 @@ class LightingPage(Gtk.Box):
             c = dialog.choose_rgba_finish(result)
             hex_color = f"#{int(c.red * 255):02X}{int(c.green * 255):02X}{int(c.blue * 255):02X}"
             self._on_color(hex_color)
-        except: pass
+        except Exception: pass
 
     def _on_mode(self, dd, _):
         modes = ["static", "breathing", "wave", "cycle"]
@@ -264,14 +314,14 @@ class LightingPage(Gtk.Box):
         self.kb_preview.queue_draw()
         if self.service:
             try: self.service.SetMode(self.mode, int(self.speed_scale.get_value()))
-            except: pass
+            except Exception: pass
 
     def _on_direction(self, dd, _):
         self.direction = "ltr" if dd.get_selected() == 0 else "rtl"
         self.kb_preview.direction = self.direction
         if self.service:
             try: self.service.SetGlobal(self.power, int(self.brightness_scale.get_value()), self.direction)
-            except: pass
+            except Exception: pass
 
     def _on_speed(self, scale):
         self.speed = int(scale.get_value())
@@ -283,7 +333,7 @@ class LightingPage(Gtk.Box):
     def _send_mode_update(self):
         if self.service:
             try: self.service.SetMode(self.mode, self.speed)
-            except: pass
+            except Exception: pass
         self._speed_timer = None
         return False
 
@@ -297,7 +347,7 @@ class LightingPage(Gtk.Box):
     def _send_global_update(self):
         if self.service:
             try: self.service.SetGlobal(self.power, self.brightness, self.direction)
-            except: pass
+            except Exception: pass
         self._bri_timer = None
         return False
 

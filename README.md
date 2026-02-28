@@ -1,13 +1,32 @@
-# HP Laptop Manager (Linux) v4.5
+**# HP Laptop Manager (Linux) v4.6**
 <p align="center">
   <img src="images/hp_logo.png" alt="Logo" width="250">
 </p>
 
 ## 📖 About The Project
+<p align="center">
+  <img src="screenshots/dash.png" alt="Dashboard" width="45%">
+  <img src="screenshots/fan.png" alt="Fan Control" width="45%">
+</p>
+<p align="center">
+  <img src="screenshots/key.png" alt="Lighting" width="45%">
+  <img src="screenshots/mux.png" alt="MUX Switch" width="45%">
+</p>
+<p align="center">
+  <img src="screenshots/games.png" alt="Games" width="45%">
+  <img src="screenshots/tools.png" alt="Tools" width="45%">
+</p>
+<p align="center">
+  <img src="screenshots/settings.png" alt="Settings" width="45%">
+</p>
+
 **HP Laptop Manager** is a native Linux application designed to unlock the full potential of HP Omen and Victus series laptops. It serves as an open-source alternative to the official OMEN Gaming Hub, providing essential controls in a modern, user-friendly interface.
 
-**New in v4.5:**
+**New in v4.6:**
+- 📊 **New Dashboard Page**: Completely redesigned real-time overview with CPU/GPU temps, battery health, resource donuts, hardware profile pills, and quick actions.
 - ✨ **Unified Kernel Driver**: `hp-omen-core` companion driver with DKMS for out-of-the-box fan and RGB support without conflicts.
+- 💤 **Smart GPU Sleep**: The background daemon now natively detects if the discrete GPU (dGPU) is suspended (e.g., `d3cold`) and refrains from polling `nvidia-smi` to prevent unnecessary waking and overheating.
+- 🌡️ **Accurate Core Temps**: Improved CPU temperature calculations by precisely averaging all available core temperatures instead of relying on legacy ACPI limits.
 - ⌨️ **Omen Key Support**: Pressing the physical Omen Key natively opens the manager GUI via lightweight input listening.
 - 📝 **TOML Configuration**: Modern config management with automatic migration from older JSON settings.
 - 🌍 **Localization**: Full support for English and Turkish languages (auto-detected).
@@ -81,20 +100,6 @@ sudo ./uninstall.sh
 | **Zorin OS / Pop!_OS** | ✅ Verified | Native support |
 | **OpenSUSE Tumbleweed** | ✅ Verified | Full support via `zypper` |
 
-## 📸 Screenshots
-
-<p align="center">
-  <img src="screenshots/games_page.png" alt="Library" width="45%">
-  <img src="screenshots/fan_control.png" alt="Fan Control" width="45%">
-</p>
-<p align="center">
-  <img src="screenshots/settings.png" alt="Settings" width="45%">
-  <img src="screenshots/light.png" alt="Lighting" width="45%">
-</p>
-<p align="center">
-  <img src="screenshots/muxpage.png" alt="MUX Switch" width="45%">
-  <img src="screenshots/toolspage.png" alt="Tools" width="45%">
-</p>
 
 ## 👨‍💻 Credits & Acknowledgments
 - **Lead Developer**: [yunusemreyl](https://github.com/yunusemreyl)

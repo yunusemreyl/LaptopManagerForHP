@@ -15,7 +15,7 @@ def T(k):
     return _T(k)
 
 
-APP_VERSION = "4.5"
+APP_VERSION = "4.6"
 GITHUB_REPO = "yunusemreyl/LaptopManagerForHP"
 GITHUB_API_URL = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 GITHUB_RELEASES_URL = f"https://github.com/{GITHUB_REPO}/releases/latest"
@@ -51,7 +51,7 @@ class SettingsPage(Gtk.Box):
         # Theme
         theme_row = Gtk.Box(spacing=20)
         theme_row.append(Gtk.Label(label=T("theme"), hexpand=True, xalign=0))
-        self.theme_dd = Gtk.DropDown(model=Gtk.StringList.new([T("dark"), T("light")]))
+        self.theme_dd = Gtk.DropDown(model=Gtk.StringList.new([T("dark"), T("light"), T("system")]))
         self.theme_dd.connect("notify::selected", self._on_theme)
         theme_row.append(self.theme_dd)
         appear_card.append(theme_row)
@@ -226,7 +226,8 @@ class SettingsPage(Gtk.Box):
 
     # ── Theme / Lang ──
     def _on_theme(self, dd, _):
-        theme = "dark" if dd.get_selected() == 0 else "light"
+        idx = dd.get_selected()
+        theme = "dark" if idx == 0 else "light" if idx == 1 else "system"
         if self.on_theme_change:
             self.on_theme_change(theme)
 
@@ -253,11 +254,11 @@ class SettingsPage(Gtk.Box):
         try:
             import subprocess
             return subprocess.check_output(["lsb_release", "-ds"], stderr=subprocess.DEVNULL).decode().strip().replace('"', '')
-        except:
+        except Exception:
             try:
                 with open("/etc/os-release") as f:
                     for line in f:
                         if line.startswith("PRETTY_NAME="):
                             return line.split("=", 1)[1].strip().strip('"')
-            except: pass
+            except Exception: pass
         return "Linux"

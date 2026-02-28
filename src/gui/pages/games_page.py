@@ -97,7 +97,8 @@ class GamesPage(Gtk.Box):
             for f in os.listdir(spath):
                 if f.startswith("appmanifest_") and f.endswith(".acf"):
                     try:
-                        data = open(os.path.join(spath, f)).read()
+                        with open(os.path.join(spath, f)) as fh:
+                            data = fh.read()
                         name = self._parse_vdf_value(data, "name")
                         appid = self._parse_vdf_value(data, "appid")
                         if name and name.lower() not in ("steamworks common redistributables", "proton"):
@@ -107,7 +108,7 @@ class GamesPage(Gtk.Box):
                                 "appid": appid,
                                 "launch": f"steam://rungameid/{appid}"
                             })
-                    except:
+                    except Exception:
                         pass
             break  # Only first valid path
         return games
@@ -137,7 +138,7 @@ class GamesPage(Gtk.Box):
                     "slug": g.get("slug", ""),
                     "launch": f"lutris:rungameid/{g.get('id', '')}"
                 })
-        except:
+        except Exception:
             pass
         return games
 
@@ -150,7 +151,8 @@ class GamesPage(Gtk.Box):
         for path in [lib_path, epic_path]:
             if os.path.exists(path):
                 try:
-                    data = json.load(open(path))
+                    with open(path) as fh:
+                        data = json.load(fh)
                     lib = data.get("library", data) if isinstance(data, dict) else data
                     if isinstance(lib, list):
                         for g in lib:
@@ -160,7 +162,7 @@ class GamesPage(Gtk.Box):
                                 "source": "Heroic",
                                 "launch": None
                             })
-                except:
+                except Exception:
                     pass
         return games
 
@@ -231,7 +233,7 @@ class GamesPage(Gtk.Box):
     def _launch(self, cmd):
         try:
             subprocess.Popen(["xdg-open", cmd], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        except:
+        except Exception:
             pass
 
     def _on_search(self, entry):

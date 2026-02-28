@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
 """MUX Page - GPU info + mode switching — i18n via T()."""
-import os, json, subprocess, shutil
+import os
+import json
+import subprocess
+import shutil
+import sys
 import gi
 gi.require_version('Gtk', '4.0')
 from gi.repository import Gtk, GLib
 
-import sys
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
@@ -30,7 +34,7 @@ def _get_nvidia_info():
             info["driver"] = parts[1].strip()
         elif len(parts) == 1:
             info["name"] = parts[0].strip()
-    except: pass
+    except Exception: pass
     return info
 
 
@@ -53,7 +57,30 @@ class MUXPage(Gtk.Box):
         self.service = service
         GLib.idle_add(self._refresh)
 
+    def _detect_gpus(self):
+        igpu = T("integrated_desc")
+        dgpu = T("discrete_desc")
+        import re
+        try:
+            out = subprocess.check_output(["lspci"], text=True)
+            for line in out.splitlines():
+                if "VGA" in line or "3D" in line:
+                    if "Intel" in line:
+                        igpu = "Intel Iris Xe Graphics" if "Iris" in line else "Intel UHD Graphics"
+                    elif "AMD" in line or "Radeon" in line:
+                        igpu = "AMD Radeon Graphics"
+                    if "NVIDIA" in line:
+                        m = re.search(r'(RTX \d+|GTX \d+|GTX \d+ Ti)', line)
+                        if m:
+                            dgpu = f"NVIDIA GeForce {m.group(1)}"
+                        else:
+                            dgpu = "NVIDIA GeForce"
+        except Exception: pass
+        return igpu, dgpu
+
     def _build_ui(self):
+        dyn_igpu, dyn_dgpu = self._detect_gpus()
+
         title = Gtk.Label(label=T("mux_switch"), xalign=0)
         title.add_css_class("page-title")
         self.append(title)
@@ -104,27 +131,79 @@ class MUXPage(Gtk.Box):
             ("integrated", T("integrated"), T("integrated_desc"), "battery-level-100-symbolic"),
         ]
 
-        self.mode_buttons = {}
-        for mode_id, label, desc, icon in modes:
-            wrapper = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
-            btn = Gtk.ToggleButton()
-            btn.set_size_request(160, 130)
-            btn.add_css_class("mux-btn")
-            btn_content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8, halign=Gtk.Align.CENTER, valign=Gtk.Align.CENTER)
-            ic = Gtk.Image.new_from_icon_name(icon)
-            ic.set_pixel_size(48)
-            btn_content.append(ic)
-            btn.set_child(btn_content)
-            if self.mux_group:
-                btn.set_group(self.mux_group)
-            else:
-                self.mux_group = btn
-            btn.connect("toggled", lambda w, m=mode_id: self._on_mode_select(m) if w.get_active() else None)
-            wrapper.append(btn)
-            wrapper.append(Gtk.Label(label=label, css_classes=["stat-big"]))
-            wrapper.append(Gtk.Label(label=desc, css_classes=["stat-lbl"], wrap=True, justify=Gtk.Justification.CENTER))
-            self.mux_box.append(wrapper)
-            self.mode_buttons[mode_id] = btn
+        self.mode_buttons = {} # Initialize for later use
+
+        # Integrated Mode Box
+        self.igpu_outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10, halign=Gtk.Align.CENTER)
+        
+        igpu_icon = Gtk.Image.new_from_icon_name("battery-symbolic")
+        igpu_icon.set_pixel_size(80)
+        igpu_icon.set_halign(Gtk.Align.CENTER)
+        
+        self.btn_igpu = Gtk.ToggleButton(child=igpu_icon)
+        self.btn_igpu.add_css_class("mux-btn")
+        self.btn_igpu.connect("toggled", lambda w: self._on_mode_select("integrated") if w.get_active() else None)
+        self.igpu_outer.append(self.btn_igpu)
+        
+        igpu_lbl = Gtk.Label(label=T("integrated"), css_classes=["stat-big"])
+        self.igpu_outer.append(igpu_lbl)
+        
+        igpu_desc = Gtk.Label(label=dyn_igpu)
+        igpu_desc.set_justify(Gtk.Justification.CENTER)
+        igpu_desc.add_css_class("stat-lbl")
+        self.igpu_outer.append(igpu_desc)
+        
+        self.mux_box.append(self.igpu_outer)
+        self.mode_buttons["integrated"] = self.btn_igpu # Store for _refresh
+        self.mode_buttons["intel"] = self.btn_igpu # Alias for _refresh
+
+        # Discrete Mode Box
+        self.dgpu_outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10, halign=Gtk.Align.CENTER)
+        
+        dgpu_icon = Gtk.Image.new_from_icon_name("video-display-symbolic")
+        dgpu_icon.set_pixel_size(80)
+        dgpu_icon.set_halign(Gtk.Align.CENTER)
+        
+        self.btn_dgpu = Gtk.ToggleButton(child=dgpu_icon)
+        self.btn_dgpu.add_css_class("mux-btn")
+        self.btn_dgpu.connect("toggled", lambda w: self._on_mode_select("discrete") if w.get_active() else None)
+        self.dgpu_outer.append(self.btn_dgpu)
+        
+        dgpu_lbl = Gtk.Label(label=T("discrete"), css_classes=["stat-big"])
+        self.dgpu_outer.append(dgpu_lbl)
+        
+        dgpu_desc = Gtk.Label(label=dyn_dgpu)
+        dgpu_desc.set_justify(Gtk.Justification.CENTER)
+        dgpu_desc.add_css_class("stat-lbl")
+        self.dgpu_outer.append(dgpu_desc)
+        
+        self.mux_box.append(self.dgpu_outer)
+        self.mode_buttons["discrete"] = self.btn_dgpu # Store for _refresh
+        self.mode_buttons["dedicated"] = self.btn_dgpu # Alias for _refresh
+        self.mode_buttons["nvidia"] = self.btn_dgpu # Alias for _refresh
+
+        # Hybrid Mode Box (Re-adding based on original structure, but with new styling)
+        self.hybrid_outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10, halign=Gtk.Align.CENTER)
+
+        hybrid_icon = Gtk.Image.new_from_icon_name("preferences-system-symbolic")
+        hybrid_icon.set_pixel_size(80)
+        
+        self.btn_hybrid = Gtk.ToggleButton(child=hybrid_icon)
+        self.btn_hybrid.add_css_class("mux-btn")
+        self.btn_hybrid.connect("toggled", lambda w: self._on_mode_select("hybrid") if w.get_active() else None)
+        self.hybrid_outer.append(self.btn_hybrid)
+
+        hybrid_lbl = Gtk.Label(label=T("hybrid"), css_classes=["stat-big"])
+        self.hybrid_outer.append(hybrid_lbl)
+
+        hybrid_desc = Gtk.Label(label=T("hybrid_desc"))
+        hybrid_desc.set_justify(Gtk.Justification.CENTER)
+        hybrid_desc.add_css_class("stat-lbl")
+        self.hybrid_outer.append(hybrid_desc)
+
+        self.mux_box.append(self.hybrid_outer)
+        self.mode_buttons["hybrid"] = self.btn_hybrid # Store for _refresh
+        self.mode_buttons["on-demand"] = self.btn_hybrid # Alias for _refresh
 
         card.append(self.mux_box)
 
@@ -218,4 +297,4 @@ class MUXPage(Gtk.Box):
                 self.not_available.set_visible(True)
                 self.mux_box.set_visible(False)
                 self.status_label.set_label(T("mux_not_found"))
-        except: pass
+        except Exception: pass

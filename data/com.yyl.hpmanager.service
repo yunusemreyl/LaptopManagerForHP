@@ -1,0 +1,23 @@
+[Unit]
+Description=HP Laptop Manager Daemon
+After=dbus.service
+Requires=dbus.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /usr/libexec/hp-manager/hp_manager_service.py
+Restart=on-failure
+RestartSec=5
+
+# Security hardening (relaxed for hardware access)
+ProtectHome=true
+PrivateTmp=true
+NoNewPrivileges=true
+LockPersonality=true
+RestrictSUIDSGID=true
+
+# Required paths for HP hardware access
+ReadWritePaths=/sys /etc/hp-manager
+
+[Install]
+WantedBy=multi-user.target

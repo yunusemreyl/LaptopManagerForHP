@@ -1,0 +1,11 @@
+[Desktop Entry]
+Name=HP Laptop Manager
+Comment=HP dizüstü bilgisayar yönetim aracı
+Comment[en]=HP Laptop management tool
+Exec=/usr/bin/hp-manager
+Icon=/usr/share/hp-manager/images/hp_logo.png
+Terminal=false
+Type=Application
+Categories=System;Settings;HardwareSettings;
+Keywords=HP;Omen;Victus;Fan;RGB;GPU;Gaming;
+StartupNotify=true

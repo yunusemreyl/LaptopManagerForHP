@@ -206,7 +206,7 @@ install_app() {
     # Copy images if exist
     if [ -d "images" ] && [ "$(ls -A images/ 2>/dev/null)" ]; then
         cp images/* "$DATA_DIR/images/" 2>/dev/null || true
-        cp images/hplogodark.png "$DATA_DIR/images/hp_logo.png" 2>/dev/null || true
+        cp images/hplogolight.png "$DATA_DIR/images/hp_logo.png" 2>/dev/null || true
         log "$(msg images_copied)"
     fi
 
@@ -260,13 +260,29 @@ MODCONF
     rm -f /etc/modprobe.d/hp-omen-core.conf 2>/dev/null || true
     log "hp-omen-core set to load on boot ($MODULES_LOAD_FILE)"
 
-    # Remove stock module if loaded, then load project's modules
-    rmmod hp_wmi 2>/dev/null || true
-    rmmod hp_omen_core 2>/dev/null || true
-    
-    # Try modprobe first, but don't fail if they can't be loaded immediately (DKMS might need reboot on some systems)
-    modprobe hp-wmi 2>/dev/null || true
-    modprobe hp-omen-core 2>/dev/null || true
+    # Detect kernel version for smart module management
+    _KERN_VER=$(uname -r | grep -oP '^\d+\.\d+')
+    _KERN_MAJOR=$(echo "$_KERN_VER" | cut -d. -f1)
+    _KERN_MINOR=$(echo "$_KERN_VER" | cut -d. -f2)
+    _STOCK_FAN=false
+    if [ "$_KERN_MAJOR" -gt 6 ] 2>/dev/null || \
+       { [ "$_KERN_MAJOR" -eq 6 ] && [ "$_KERN_MINOR" -ge 18 ]; } 2>/dev/null; then
+        _STOCK_FAN=true
+    fi
+
+    if $_STOCK_FAN; then
+        # Kernel 6.18+: stock hp-wmi already has Omen fan control
+        info "Kernel $(uname -r) (>= 6.18): using stock hp-wmi for fan control."
+        # Only load hp-omen-core for RGB
+        rmmod hp_omen_core 2>/dev/null || true
+        modprobe hp-omen-core 2>/dev/null || true
+    else
+        # Kernel < 6.18: replace stock module with custom one
+        rmmod hp_wmi 2>/dev/null || true
+        rmmod hp_omen_core 2>/dev/null || true
+        modprobe hp-wmi 2>/dev/null || true
+        modprobe hp-omen-core 2>/dev/null || true
+    fi
 
     # Enable and start daemon
     systemctl daemon-reload
@@ -346,6 +362,18 @@ case "${1:-install}" in
         echo ""
         log "$(msg success)"
         info "$(msg start_hint)"
+        # Show Secure Boot warning if active
+        if command -v mokutil &>/dev/null && mokutil --sb-state 2>/dev/null | grep -qi "SecureBoot enabled"; then
+            echo ""
+            echo -e "${YELLOW}╔═══════════════════════════════════════════════════════════╗${NC}"
+            echo -e "${YELLOW}║  ⚠  Secure Boot is ENABLED                               ║${NC}"
+            echo -e "${YELLOW}║                                                           ║${NC}"
+            echo -e "${YELLOW}║  Keyboard RGB control (hp-omen-core) is unavailable.     ║${NC}"
+            echo -e "${YELLOW}║  Disable Secure Boot in BIOS to use keyboard lighting.   ║${NC}"
+            echo -e "${YELLOW}║  All other features work normally.                        ║${NC}"
+            echo -e "${YELLOW}╚═══════════════════════════════════════════════════════════╝${NC}"
+            echo ""
+        fi
         ;;
     uninstall|remove)
         uninstall_app

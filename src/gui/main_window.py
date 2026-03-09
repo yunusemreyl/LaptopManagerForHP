@@ -47,7 +47,7 @@ from pages.mux_page import MUXPage
 from pages.settings_page import SettingsPage
 from pages.dashboard_page import DashboardPage
 
-APP_VERSION = "4.8"
+APP_VERSION = "1.0.0"
 CONFIG_FILE = os.path.expanduser("~/.config/hp-manager.toml")
 CONFIG_FILE_JSON = os.path.expanduser("~/.config/hp-manager.json")
 
@@ -67,7 +67,7 @@ class HPManagerWindow(Gtk.ApplicationWindow):
         if IMAGES_DIR not in icon_theme.get_search_path():
             icon_theme.add_search_path(IMAGES_DIR)
         
-        self.set_icon_name("hp_logo")
+        self.set_icon_name("hplogolight")
 
         self.app_theme = "dark"
         self.temp_unit = "C"
@@ -488,6 +488,20 @@ class HPManagerWindow(Gtk.ApplicationWindow):
             background: {accent};
             color: white;
             box-shadow: 0 4px 12px {accent_shadow_strong};
+        }}
+
+        /* ── Dashboard perf mode colors ── */
+        .perf-eco:checked {{
+            background: #2ec27e;
+            box-shadow: 0 4px 12px rgba(46, 194, 126, 0.35);
+        }}
+        .perf-balanced:checked {{
+            background: {accent};
+            box-shadow: 0 4px 12px {accent_shadow_strong};
+        }}
+        .perf-performance:checked {{
+            background: #e66100;
+            box-shadow: 0 4px 12px rgba(230, 97, 0, 0.35);
         }}
 
         /* ── Tool cards ── */

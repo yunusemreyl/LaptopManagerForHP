@@ -1,5 +1,5 @@
 
- # HP Laptop Manager (Linux) v4.8 #
+ # HP Laptop Manager (Linux) v1.0.0 #
 <p align="center">
   <img src="images/hplogolight.png" alt="Logo" width="250">
 
@@ -22,15 +22,19 @@
 
 **HP Laptop Manager** is a native Linux application designed to unlock the full potential of HP Omen and Victus series laptops. It serves as an open-source alternative to the official OMEN Gaming Hub, providing essential controls in a modern, user-friendly interface.
 
-**New in v4.7:**
-- 💫 **UI Hover Enhancements**: Added smooth glassmorphic scale and glow interactions to Dashboard Quick Actions, Performance Slider, and MUX/Fan profile buttons.
-- 💡 **Dynamic Power Tooltips**: Power Profiles (ECO/Balanced/Performance) now feature intelligent mouse-hover tooltips reflecting real-time CPU/GPU hardware limits.
-- 🏷️ **Global Tab Rename**: The Fan tab is now globally unified as the "Performance" Hub (Performans in Turkish).
-- 📊 **Dashboard Segmented Control**: Integrated native GTK Segmented Control for power profiles inside the Dashboard, matching the sleek Fan page styling.
-- ✨ **Unified Kernel Driver**: `hp-omen-core` companion driver with DKMS for out-of-the-box fan and RGB support without conflicts.
-- 💤 **Smart GPU Sleep**: The background daemon natively detects if the discrete GPU (dGPU) is suspended (e.g., `d3cold`) and refrains from polling `nvidia-smi`.
-- ⌨️ **Omen Key Support**: Pressing the physical Omen Key natively opens the manager GUI via lightweight input listening.
-- 📝 **TOML Configuration**: Modern config management with automatic migration from older JSON settings.
+**New in v1.0.0:**
+
+> 📦 **Versioning Change**: Starting with this release, the project adopts **Semantic Versioning** (`major.minor.patch`) for a more professional and standardized release cycle. Previous versions (v4.x) have been remapped accordingly.
+
+- 🔄 **Stock HP WMI Support**: On kernel 6.18+, the application now uses the **original HP WMI driver** shipped with the kernel for fan control — no custom WMI module needed.
+- 🛠️ **Legacy Kernel Support**: For kernels **below 6.18**, the custom WMI driver (`hp-wmi`) is still bundled and the installer automatically installs it alongside `hp-omen-core`.
+- ⚠️ **Secure Boot Notice**: Keyboard RGB control (`hp-omen-core`) is **not compatible with Secure Boot**. If Secure Boot is enabled, the `hp-omen-core` module cannot be loaded and keyboard lighting features will be unavailable. You must **disable Secure Boot** in BIOS to use keyboard control.
+- 🔥 **Automatic Updates**: Check for and install updates directly from the Settings page — no need to re-clone or download manually.
+- 🌡️ **Accurate GPU Temperature**: Fixed GPU temperature detection — correctly uses `nvidia-smi` with auto-detected PCI path, and never falls back to CPU package temperature.
+- 🎨 **Performance Mode Colors**: Dashboard performance buttons now use distinct colors (green/blue/orange) instead of emojis.
+- 🔋 **Battery-Safe GPU Polling**: Dashboard no longer wakes the dGPU from sleep — checks PCI suspend state before polling `nvidia-smi`.
+- ⚡ **Smooth CPU Readings**: CPU usage display uses EMA smoothing to eliminate rapid fluctuations.
+- 🎮 **Non-Blocking Game Scan**: Game library scanning runs in background — no more UI freezing when opening the Games tab.
 
 ## ✨ Features
 
@@ -73,9 +77,14 @@ sudo ./install.sh
 
 The installer will automatically:
 1. Detect your package manager and install dependencies.
-2. Install the daemon and GUI components.
-3. Set up system services.
-4. Provide a troubleshooting guide if issues occur.
+2. Detect your kernel version and install the appropriate driver:
+   - **Kernel ≥ 6.18**: Only installs `hp-omen-core` (RGB). Fan control is provided by the stock `hp-wmi` module.
+   - **Kernel < 6.18**: Installs both the custom `hp-wmi` driver and `hp-omen-core`.
+3. Install the daemon and GUI components.
+4. Set up system services.
+5. Provide a troubleshooting guide if issues occur.
+
+> ⚠️ **Secure Boot Warning**: The `hp-omen-core` kernel module (keyboard RGB control) **cannot be loaded** when Secure Boot is enabled. If you need keyboard lighting control, you must disable Secure Boot from your BIOS settings. Fan control and other features work normally regardless of Secure Boot status on kernel 6.18+.
 
 ## 🗑️ Uninstallation
 

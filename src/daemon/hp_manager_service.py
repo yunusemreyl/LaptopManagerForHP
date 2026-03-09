@@ -8,7 +8,10 @@ from gi.repository import GLib
 from pydbus import SystemBus
 
 # --- PATHS ---
-DRIVER_PATH = "/sys/devices/platform/hp-omen-core"
+# hp-omen-core sysfs path (custom DKMS module)
+DRIVER_PATH_CUSTOM = "/sys/devices/platform/hp-omen-core"
+# Fallback: check if the module is loaded via lsmod
+DRIVER_PATH = DRIVER_PATH_CUSTOM
 CONFIG_FILE = "/etc/hp-manager/state.json"
 
 # --- LOGLAMA ---
@@ -44,7 +47,11 @@ class FanController:
             self._read_current_mode()
 
     def _find_hwmon(self):
-        """Find the 'hp' hwmon device."""
+        """Find the 'hp' hwmon device.
+        Works with both the custom DKMS hp-wmi module and the stock
+        kernel hp-wmi module (which gained Omen fan control in 6.18+).
+        """
+        # Method 1: Scan /sys/class/hwmon for name == "hp"
         if os.path.exists("/sys/class/hwmon"):
             for d in sorted(os.listdir("/sys/class/hwmon")):
                 path = os.path.join("/sys/class/hwmon", d)
@@ -54,9 +61,26 @@ class FanController:
                         with open(name_file) as f:
                             name = f.read().strip().lower()
                         if name == "hp":
+                            logger.info(f"Found HP hwmon at {path}")
                             return path
                     except Exception:
                         pass
+
+        # Method 2: Try platform device hwmon symlink
+        # Stock kernel module: /sys/devices/platform/hp-wmi/hwmon/hwmonN
+        for platform_name in ("hp-wmi", "hp_wmi"):
+            platform_hwmon = f"/sys/devices/platform/{platform_name}/hwmon"
+            if os.path.exists(platform_hwmon):
+                try:
+                    entries = sorted(os.listdir(platform_hwmon))
+                    if entries:
+                        path = os.path.join(platform_hwmon, entries[0])
+                        logger.info(f"Found HP hwmon via platform device at {path}")
+                        return path
+                except Exception:
+                    pass
+
+        logger.warning("No HP hwmon device found")
         return None
 
     def _detect_fans(self):
@@ -183,8 +207,38 @@ class FanController:
 # ============================================================
 class RGBController:
     def __init__(self):
-        self.available = os.path.exists(DRIVER_PATH)
+        self.driver_path = self._find_rgb_path()
+        self.available = self.driver_path is not None
         self.last_written = [None] * 4
+
+    def _find_rgb_path(self):
+        """Find the RGB control sysfs path.
+        Checks the custom hp-omen-core platform device first,
+        then falls back to lsmod to see if the module is loaded.
+        """
+        # Custom DKMS module path
+        if os.path.exists(DRIVER_PATH_CUSTOM):
+            logger.info(f"RGB: Using custom driver path {DRIVER_PATH_CUSTOM}")
+            return DRIVER_PATH_CUSTOM
+
+        # Check if hp_omen_core module is loaded (stock kernel builds may
+        # use a different platform device path or the LED subsystem)
+        try:
+            result = subprocess.run(
+                ["lsmod"], capture_output=True, text=True, timeout=5
+            )
+            if "hp_omen_core" in result.stdout:
+                # Module is loaded but path might differ
+                for candidate in ("/sys/devices/platform/hp-omen-core",
+                                  "/sys/devices/platform/hp_omen_core"):
+                    if os.path.exists(candidate):
+                        logger.info(f"RGB: Found loaded module at {candidate}")
+                        return candidate
+        except Exception:
+            pass
+
+        logger.info("RGB: No RGB control path found (hp-omen-core not loaded)")
+        return None
 
     def is_available(self):
         return self.available
@@ -194,7 +248,7 @@ class RGBController:
             return
         if self.last_written[zone] == hex_color:
             return
-        path = f"{DRIVER_PATH}/zone{zone}"
+        path = f"{self.driver_path}/zone{zone}"
         try:
             with open(path, "w") as f:
                 f.write(hex_color)
@@ -210,7 +264,7 @@ class RGBController:
     def write_brightness(self, on):
         if not self.available:
             return
-        path = f"{DRIVER_PATH}/brightness"
+        path = f"{self.driver_path}/brightness"
         try:
             with open(path, "w") as f:
                 f.write("1" if on else "0")
@@ -732,8 +786,20 @@ class HPManagerService(object):
         if shutil.which("nvidia-smi"):
             # Check if dGPU is suspended to avoid waking it
             is_awake = True
-            pci_path = "/sys/bus/pci/devices/0000:01:00.0/power/runtime_status"
-            if os.path.exists(pci_path):
+            # Auto-detect NVIDIA PCI device path (vendor 0x10de)
+            pci_path = None
+            try:
+                for dev in os.listdir("/sys/bus/pci/devices"):
+                    vendor_file = f"/sys/bus/pci/devices/{dev}/vendor"
+                    if os.path.exists(vendor_file):
+                        with open(vendor_file) as f:
+                            if f.read().strip() == "0x10de":
+                                pci_path = f"/sys/bus/pci/devices/{dev}/power/runtime_status"
+                                break
+            except Exception:
+                pass
+
+            if pci_path and os.path.exists(pci_path):
                 try:
                     with open(pci_path) as f:
                         if f.read().strip() == "suspended":
@@ -752,17 +818,16 @@ class HPManagerService(object):
                     )
                 except Exception:
                     pass
+
+        # AMD GPU fallback (no CPU pkg_temp fallback — that's a different sensor)
         if info["gpu_temp"] == 0:
-            if pkg_temp > 0:
-                info["gpu_temp"] = pkg_temp
-            else:
-                hp = _find_hwmon_by_name("amdgpu")
-                if hp:
-                    try:
-                        with open(os.path.join(hp, "temp1_input")) as f:
-                            info["gpu_temp"] = int(f.read().strip()) / 1000
-                    except Exception:
-                        pass
+            hp = _find_hwmon_by_name("amdgpu")
+            if hp:
+                try:
+                    with open(os.path.join(hp, "temp1_input")) as f:
+                        info["gpu_temp"] = int(f.read().strip()) / 1000
+                except Exception:
+                    pass
 
         return json.dumps(info)
 

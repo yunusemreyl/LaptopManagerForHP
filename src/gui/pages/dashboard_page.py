@@ -129,6 +129,7 @@ class DashboardPage(Gtk.Box):
         self.on_navigate = on_navigate
         self._timer_id = None
         self._cpu_prev = None       # (total, idle) for delta calc
+        self._cpu_smooth = 0.0      # EMA-smoothed CPU %
         self._data = {}             # latest bg-fetched snapshot
         self._busy = False          # guard against overlapping bg threads
         self._temp_unit = "C"       # temperature unit preference
@@ -306,7 +307,8 @@ class DashboardPage(Gtk.Box):
         card.append(self._heading(T("resources")))
         card.append(Gtk.Separator())
 
-        row = Gtk.Box(spacing=12, homogeneous=True, halign=Gtk.Align.CENTER)
+        row = Gtk.Box(spacing=12, homogeneous=True, halign=Gtk.Align.CENTER,
+                      vexpand=True, valign=Gtk.Align.CENTER)
         self._cpu_chart = DonutChart("#3584e4", "CPU", size=130)
         self._ram_chart = DonutChart("#2ec27e", "RAM", size=130)
         self._gpu_chart = DonutChart("#e66100", "GPU", size=130)
@@ -353,12 +355,13 @@ class DashboardPage(Gtk.Box):
         self._perf_btns = {}
         
         for mode_id, label in [
-            ("eco", f"🌿 {T('eco_mode')}"), 
-            ("balanced", f"⚖️ {T('balanced')}"), 
-            ("performance", f"🚀 {T('performance')}")
+            ("eco", T('eco_mode')), 
+            ("balanced", T('balanced')), 
+            ("performance", T('performance'))
         ]:
             btn = Gtk.ToggleButton()
             btn.add_css_class("fan-mode-btn")
+            btn.add_css_class(f"perf-{mode_id}")
             btn.set_child(Gtk.Label(label=label))
             
             if self._perf_group:
@@ -451,9 +454,15 @@ class DashboardPage(Gtk.Box):
                 except Exception:
                     pass
 
-        # ── CPU/GPU temp from hwmon (same logic as fan page) ──────────────
-        d["cpu_temp"] = self._get_cpu_temp()
-        d["gpu_temp"] = self._get_gpu_temp()
+        # ── CPU/GPU temp — prefer daemon values for consistency with fan page ─
+        si = d.get("sys", {})
+        d["cpu_temp"] = si.get("cpu_temp", 0)
+        d["gpu_temp"] = si.get("gpu_temp", 0)
+        # Fallback to direct hwmon only if daemon didn't provide temps
+        if not d["cpu_temp"]:
+            d["cpu_temp"] = self._get_cpu_temp()
+        if not d["gpu_temp"]:
+            d["gpu_temp"] = self._get_gpu_temp()
 
         # ── CPU % from /proc/stat ─────────────────────────────────────────
         try:
@@ -465,7 +474,11 @@ class DashboardPage(Gtk.Box):
             if self._cpu_prev:
                 dt = total - self._cpu_prev[0]
                 di = idle  - self._cpu_prev[1]
-                d["cpu_pct"] = (1 - di / dt) * 100 if dt else 0
+                raw = (1 - di / dt) * 100 if dt else 0
+                # EMA smoothing (α=0.3) to reduce jitter
+                alpha = 0.3
+                self._cpu_smooth = alpha * raw + (1 - alpha) * self._cpu_smooth
+                d["cpu_pct"] = self._cpu_smooth
             self._cpu_prev = (total, idle)
         except Exception:
             pass
@@ -485,15 +498,40 @@ class DashboardPage(Gtk.Box):
 
         # ── GPU % from nvidia-smi ─────────────────────────────────────────
         if _NVIDIA_SMI:
+            # Check if dGPU is suspended to avoid waking it
+            is_awake = True
+            pci_path = None
             try:
-                out = subprocess.check_output(
-                    [_NVIDIA_SMI, "--query-gpu=utilization.gpu",
-                     "--format=csv,noheader,nounits"],
-                    stderr=subprocess.DEVNULL, timeout=3
-                ).decode().strip()
-                d["gpu_pct"] = float(out)
+                for dev in os.listdir("/sys/bus/pci/devices"):
+                    vendor_file = f"/sys/bus/pci/devices/{dev}/vendor"
+                    if os.path.exists(vendor_file):
+                        with open(vendor_file) as f:
+                            if f.read().strip() == "0x10de":
+                                pci_path = f"/sys/bus/pci/devices/{dev}/power/runtime_status"
+                                break
             except Exception:
                 pass
+
+            if pci_path and os.path.exists(pci_path):
+                try:
+                    with open(pci_path) as f:
+                        if f.read().strip() == "suspended":
+                            is_awake = False
+                except Exception:
+                    pass
+
+            if is_awake:
+                try:
+                    out = subprocess.check_output(
+                        [_NVIDIA_SMI, "--query-gpu=utilization.gpu",
+                         "--format=csv,noheader,nounits"],
+                        stderr=subprocess.DEVNULL, timeout=3
+                    ).decode().strip()
+                    d["gpu_pct"] = float(out)
+                except Exception:
+                    pass
+            else:
+                d["gpu_pct"] = 0.0
 
         # ── Battery from sysfs ────────────────────────────────────────────
         for name in ("BAT0", "BAT1", "BATT"):

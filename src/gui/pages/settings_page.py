@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Settings Page with GitHub update checker — i18n via T()."""
-import os, platform, threading, json
+import os, platform, threading, json, subprocess, shutil, tempfile
 import gi
 gi.require_version('Gtk', '4.0')
 from gi.repository import Gtk, GLib
@@ -16,7 +16,7 @@ def T(k):
     return _T(k)
 
 
-APP_VERSION = "4.8"
+APP_VERSION = "1.0.0"
 GITHUB_REPO = "yunusemreyl/LaptopManagerForHP"
 GITHUB_API_URL = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 GITHUB_RELEASES_URL = f"https://github.com/{GITHUB_REPO}/releases/latest"
@@ -107,7 +107,27 @@ class SettingsPage(Gtk.Box):
         self.download_btn.connect("clicked", self._open_releases)
         update_row.append(self.download_btn)
 
+        self.install_btn = Gtk.Button(label=T("install_update"))
+        self.install_btn.add_css_class("suggested-action")
+        self.install_btn.set_visible(False)
+        self.install_btn.connect("clicked", self._install_update)
+        update_row.append(self.install_btn)
+
         update_card.append(update_row)
+
+        # Progress bar for download/install
+        self.update_progress = Gtk.ProgressBar()
+        self.update_progress.set_visible(False)
+        self.update_progress.set_show_text(True)
+        update_card.append(self.update_progress)
+
+        # Restart button (shown after successful update)
+        self.restart_btn = Gtk.Button(label=T("restart_app"))
+        self.restart_btn.add_css_class("suggested-action")
+        self.restart_btn.set_visible(False)
+        self.restart_btn.connect("clicked", self._restart_app)
+        update_card.append(self.restart_btn)
+
         content.append(update_card)
 
         # ── System Info ──
@@ -133,8 +153,8 @@ class SettingsPage(Gtk.Box):
         driver_card.add_css_class("card")
         driver_card.append(Gtk.Label(label=T("driver_status"), xalign=0, css_classes=["section-title"]))
 
-        hp_omen_core_loaded = os.path.exists("/sys/devices/platform/hp-omen-core")
-        hp_wmi_loaded = os.path.exists("/sys/devices/platform/hp-wmi")
+        hp_omen_core_loaded = self._is_module_loaded("hp_omen_core")
+        hp_wmi_loaded = self._is_module_loaded("hp_wmi")
 
         drivers = [("hp-omen-core", hp_omen_core_loaded), ("hp-wmi (Fan/Thermal/Key)", hp_wmi_loaded)]
         for name, loaded in drivers:
@@ -179,6 +199,9 @@ class SettingsPage(Gtk.Box):
         self.update_spinner.start()
         self.update_status.set_label(T("update_checking"))
         self.download_btn.set_visible(False)
+        self.install_btn.set_visible(False)
+        self.restart_btn.set_visible(False)
+        self._latest_tarball_url = None
         threading.Thread(target=self._do_check_update, daemon=True).start()
 
     def _do_check_update(self):
@@ -188,7 +211,9 @@ class SettingsPage(Gtk.Box):
             with urllib.request.urlopen(req, timeout=10) as resp:
                 data = json.loads(resp.read().decode())
                 latest = data.get("tag_name", "").lstrip("v").strip()
+                tarball_url = data.get("tarball_url", "")
                 if latest and self._version_compare(latest, APP_VERSION) > 0:
+                    self._latest_tarball_url = tarball_url
                     GLib.idle_add(self._update_result, True, latest)
                 else:
                     GLib.idle_add(self._update_result, False, latest or APP_VERSION)
@@ -203,6 +228,7 @@ class SettingsPage(Gtk.Box):
             self.update_status.set_label(f"{T('new_ver_available')}: v{latest_ver}")
             self.update_status.add_css_class("update-available")
             self.download_btn.set_visible(True)
+            self.install_btn.set_visible(True)
         else:
             self.update_status.set_label(f"✓ {T('up_to_date')} (v{latest_ver})")
 
@@ -213,24 +239,160 @@ class SettingsPage(Gtk.Box):
         self.update_status.set_label(T("conn_failed"))
 
     def _open_releases(self, btn):
-        import subprocess
         subprocess.Popen(["xdg-open", GITHUB_RELEASES_URL], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    # ── Auto Update Installer ──
+    def _install_update(self, btn):
+        """Download tarball from GitHub, extract, and run install.sh via pkexec."""
+        if not getattr(self, '_latest_tarball_url', None):
+            self.update_status.set_label(f"{T('update_failed')}: No URL")
+            return
+        self.install_btn.set_sensitive(False)
+        self.download_btn.set_visible(False)
+        self.update_btn.set_sensitive(False)
+        self.update_progress.set_visible(True)
+        self.update_progress.set_fraction(0.0)
+        self.update_progress.set_text(T("downloading_update"))
+        self.update_status.set_label(T("downloading_update"))
+        threading.Thread(target=self._do_install_update, daemon=True).start()
+
+    def _do_install_update(self):
+        """Background: download → extract → pkexec install.sh."""
+        import urllib.request, tarfile
+        tmp_dir = None
+        try:
+            # Step 1: Download tarball
+            GLib.idle_add(self._install_progress, 0.1, T("downloading_update"))
+            tmp_dir = tempfile.mkdtemp(prefix="hp-manager-update-")
+            tarball_path = os.path.join(tmp_dir, "update.tar.gz")
+
+            req = urllib.request.Request(self._latest_tarball_url,
+                                         headers={"Accept": "application/vnd.github.v3+json"})
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                total = int(resp.headers.get('Content-Length', 0))
+                downloaded = 0
+                with open(tarball_path, 'wb') as f:
+                    while True:
+                        chunk = resp.read(8192)
+                        if not chunk:
+                            break
+                        f.write(chunk)
+                        downloaded += len(chunk)
+                        if total > 0:
+                            pct = min(downloaded / total, 0.5)  # download = 0-50%
+                            GLib.idle_add(self._install_progress, pct, T("downloading_update"))
+
+            GLib.idle_add(self._install_progress, 0.5, T("installing_update"))
+
+            # Step 2: Extract tarball
+            with tarfile.open(tarball_path, 'r:gz') as tar:
+                try:
+                    tar.extractall(path=tmp_dir, filter='data')
+                except TypeError:
+                    # Python < 3.12 doesn't support filter argument
+                    tar.extractall(path=tmp_dir)
+
+            # Find the extracted directory (GitHub tarballs have a single top-level dir)
+            extracted_dirs = [d for d in os.listdir(tmp_dir)
+                             if os.path.isdir(os.path.join(tmp_dir, d))]
+            if not extracted_dirs:
+                raise RuntimeError("No directory found in tarball")
+            src_dir = os.path.join(tmp_dir, extracted_dirs[0])
+
+            # Step 3: Run install.sh via pkexec
+            install_script = os.path.join(src_dir, "install.sh")
+            if not os.path.exists(install_script):
+                raise RuntimeError(f"install.sh not found in {src_dir}")
+
+            os.chmod(install_script, 0o755)
+            GLib.idle_add(self._install_progress, 0.6, T("installing_update"))
+
+            result = subprocess.run(
+                ["pkexec", "bash", install_script],
+                cwd=src_dir,
+                capture_output=True, text=True, timeout=300
+            )
+
+            GLib.idle_add(self._install_progress, 0.95, T("installing_update"))
+
+            if result.returncode == 0:
+                GLib.idle_add(self._install_done, True, "")
+            else:
+                err = result.stderr.strip() or result.stdout.strip() or f"Exit code: {result.returncode}"
+                GLib.idle_add(self._install_done, False, err)
+
+        except Exception as e:
+            GLib.idle_add(self._install_done, False, str(e))
+        finally:
+            # Cleanup temp files
+            if tmp_dir and os.path.exists(tmp_dir):
+                try:
+                    shutil.rmtree(tmp_dir)
+                except Exception:
+                    pass
+
+    def _install_progress(self, fraction, text):
+        """Update progress bar from main thread."""
+        self.update_progress.set_fraction(fraction)
+        self.update_progress.set_text(text)
+        return False
+
+    def _install_done(self, success, error_msg):
+        """Handle install completion from main thread."""
+        self.update_progress.set_fraction(1.0 if success else 0.0)
+        self.update_progress.set_visible(False)
+        self.install_btn.set_visible(False)
+        self.update_btn.set_sensitive(True)
+        if success:
+            self.update_status.set_label(f"✓ {T('update_success')}")
+            self.update_status.remove_css_class("update-available")
+            self.restart_btn.set_visible(True)
+        else:
+            self.update_status.set_label(f"{T('update_failed')}: {error_msg}")
+            self.install_btn.set_sensitive(True)
+            self.install_btn.set_visible(True)
+        return False
+
+    def _restart_app(self, btn):
+        """Restart the application after a successful update."""
+        import sys
+        python = sys.executable
+        script = os.path.abspath(sys.argv[0]) if sys.argv else ""
+        if script and os.path.exists(script):
+            subprocess.Popen([python, script])
+        app = self.get_root()
+        if app and hasattr(app, 'get_application'):
+            application = app.get_application()
+            if application:
+                application.quit()
+                return
+        # Fallback: just exit
+        sys.exit(0)
 
     @staticmethod
     def _version_compare(v1, v2):
         """Compare two version strings. Returns >0 if v1>v2, <0 if v1<v2, 0 if equal.
-        Handles pre-release tags: '4.7-rc2' < '4.7' (release)."""
+        Handles pre-release tags: '1.0.0-rc2' < '1.0.0' (release).
+        Legacy handling: old 2-segment versions (e.g. '4.8') are always
+        considered older than 3-segment SemVer versions (e.g. '1.0.0')
+        to support the v4.x → v1.0.0 migration."""
         import re
         def parse(v):
             # Split into numeric part and optional pre-release suffix
             m = re.match(r'^([\d.]+)(?:-(.+))?$', v.strip())
             if not m:
-                return ([0], '')
+                return ([0], '', False)
             nums = [int(x) for x in m.group(1).split('.') if x.isdigit()]
             pre = m.group(2) or ''  # empty string = release (higher than any pre-release)
-            return (nums, pre)
-        n1, pre1 = parse(v1)
-        n2, pre2 = parse(v2)
+            is_legacy = len(nums) <= 2  # old versioning: "4.8" style
+            return (nums, pre, is_legacy)
+        n1, pre1, leg1 = parse(v1)
+        n2, pre2, leg2 = parse(v2)
+        # Legacy migration: 2-segment (old) is always < 3-segment (SemVer)
+        if leg1 and not leg2:
+            return -1  # v1 is legacy, v2 is SemVer → v1 < v2
+        if not leg1 and leg2:
+            return 1   # v1 is SemVer, v2 is legacy → v1 > v2
         # Compare numeric parts first
         for a, b in zip(n1, n2):
             if a != b:
@@ -274,6 +436,28 @@ class SettingsPage(Gtk.Box):
         unit = "C" if dd.get_selected() == 0 else "F"
         if self.on_temp_unit_change:
             self.on_temp_unit_change(unit)
+
+    def _is_module_loaded(self, module_name):
+        """Check if a kernel module is loaded via sysfs or lsmod.
+        Handles both custom DKMS modules and stock kernel modules."""
+        # Check common sysfs platform device paths
+        sysfs_name = module_name.replace("_", "-")
+        for path in (f"/sys/devices/platform/{sysfs_name}",
+                     f"/sys/devices/platform/{module_name}"):
+            if os.path.exists(path):
+                return True
+        # Fallback: check lsmod
+        try:
+            import subprocess
+            result = subprocess.run(
+                ["lsmod"], capture_output=True, text=True, timeout=5
+            )
+            for line in result.stdout.splitlines():
+                if line.split()[0] == module_name:
+                    return True
+        except Exception:
+            pass
+        return False
 
     def _get_distro(self):
         try:

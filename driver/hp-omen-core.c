@@ -249,18 +249,26 @@ static struct platform_device *hp_omen_pdev;
 static int __init hp_omen_core_init(void) {
   int ret;
 
+  pr_info("hp-omen-core: init starting...\n");
+
   if (!wmi_has_guid(HPWMI_BIOS_GUID)) {
     pr_info("HP WMI BIOS GUID not found — not an HP system?\n");
     return -ENODEV;
   }
+  pr_info("hp-omen-core: WMI GUID found OK\n");
 
   hp_omen_pdev = platform_device_register_simple("hp-omen-core",
                                                  PLATFORM_DEVID_NONE, NULL, 0);
-  if (IS_ERR(hp_omen_pdev))
+  if (IS_ERR(hp_omen_pdev)) {
+    pr_err("hp-omen-core: platform_device_register_simple failed: %ld\n",
+           PTR_ERR(hp_omen_pdev));
     return PTR_ERR(hp_omen_pdev);
+  }
+  pr_info("hp-omen-core: platform device registered OK\n");
 
   ret = sysfs_create_groups(&hp_omen_pdev->dev.kobj, hp_omen_groups);
   if (ret) {
+    pr_err("hp-omen-core: sysfs_create_groups failed: %d\n", ret);
     platform_device_unregister(hp_omen_pdev);
     return ret;
   }

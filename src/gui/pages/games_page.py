@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Games Library Page - Yüklü oyunları tespit edip gösterir."""
-import os, json, subprocess, shutil
+import os, json, subprocess, shutil, threading
 import gi
 gi.require_version('Gtk', '4.0')
 from gi.repository import Gtk, GLib, Gdk, GdkPixbuf
@@ -23,7 +23,7 @@ class GamesPage(Gtk.Box):
 
         self.games = []
         self._build_ui()
-        GLib.idle_add(self._scan_games)
+        self.refresh()
 
     def _build_ui(self):
         # Header
@@ -76,13 +76,13 @@ class GamesPage(Gtk.Box):
         self.empty_box.append(self.empty_sub)
         self.append(self.empty_box)
 
-    def _scan_games(self):
-        self.games = []
-        self.games.extend(self._scan_steam())
-        self.games.extend(self._scan_lutris())
-        self.games.extend(self._scan_heroic())
-        self._populate()
-        return False
+    def _scan_games_thread(self):
+        games = []
+        games.extend(self._scan_steam())
+        games.extend(self._scan_lutris())
+        games.extend(self._scan_heroic())
+        self.games = games
+        GLib.idle_add(self._populate)
 
     def _scan_steam(self):
         games = []
@@ -260,4 +260,4 @@ class GamesPage(Gtk.Box):
             child = child.get_next_sibling()
 
     def refresh(self):
-        GLib.idle_add(self._scan_games)
+        threading.Thread(target=self._scan_games_thread, daemon=True).start()

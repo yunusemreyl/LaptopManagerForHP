@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Fan & Power Control Page — v4.7 with i18n.
+Fan & Power Control Page — v1.0.0 with i18n.
 """
 import os, json, subprocess, shutil, glob, threading, time
 import gi
@@ -598,20 +598,17 @@ class FanPage(Gtk.Box):
         if not sensors:
             self.sensor_box.append(Gtk.Label(label=T("no_sensor"), css_classes=["stat-lbl"]))
             return
-        cats = {"CPU": [], "GPU": [], T("other_sensors"): []}
+        cats = {"CPU": [], "GPU": [], "other": []}
         for s in sensors:
             lbl = s["label"].lower()
             dr = s["driver"].lower()
             
-            # User specifically noted 'Package id 0' represents their RTX 4050 sensor reading
-            if "package id 0" in lbl:
-                cats["GPU"].append(s)
-            elif "core" in lbl or "cpu" in lbl or "tctl" in lbl:
+            if "core" in lbl or "cpu" in lbl or "tctl" in lbl or "package id" in lbl:
                 cats["CPU"].append(s)
             elif "gpu" in lbl or "edge" in lbl or "junction" in lbl or "nouveau" in dr or "amdgpu" in dr or "nvidia" in dr:
                 cats["GPU"].append(s)
             else:
-                cats["Diğer"].append(s)
+                cats["other"].append(s)
 
         main_grid = Gtk.Grid(column_spacing=20, column_homogeneous=True)
         main_grid.set_hexpand(True)
@@ -662,7 +659,7 @@ class FanPage(Gtk.Box):
         if gpu_pill:
             right_box.append(gpu_pill)
             
-        diger_pill = create_pill("Diğer", cats["Diğer"])
+        diger_pill = create_pill(T("other_sensors"), cats["other"])
         if diger_pill:
             diger_pill.set_vexpand(True)
             right_box.append(diger_pill)

@@ -17,6 +17,19 @@ MODNAME="hp-omen-core"
 MODVER=$(grep -oP 'PACKAGE_VERSION="\K[^"]+' dkms.conf 2>/dev/null || echo "1.0.0")
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# ── Kernel version detection ──────────────────────────────────────────────────
+# Kernel 6.18+ has Omen/Victus fan control in the stock hp-wmi module.
+# On those kernels we only need hp-omen-core (RGB). On older kernels we
+# install both hp-wmi and hp-omen-core.
+KERNEL_VER=$(uname -r | grep -oP '^\d+\.\d+')
+KERNEL_MAJOR=$(echo "$KERNEL_VER" | cut -d. -f1)
+KERNEL_MINOR=$(echo "$KERNEL_VER" | cut -d. -f2)
+STOCK_FAN_SUPPORT=false
+if [ "$KERNEL_MAJOR" -gt 6 ] 2>/dev/null || \
+   { [ "$KERNEL_MAJOR" -eq 6 ] && [ "$KERNEL_MINOR" -ge 18 ]; } 2>/dev/null; then
+    STOCK_FAN_SUPPORT=true
+fi
+
 info()  { echo -e "${BLUE}[INFO]${NC} $*"; }
 ok()    { echo -e "${GREEN}[OK]${NC} $*"; }
 warn()  { echo -e "${YELLOW}[WARN]${NC} $*"; }
@@ -124,10 +137,30 @@ do_install() {
         export LLVM=1
     fi
 
-    info "Building module..."
     cd "$SCRIPT_DIR"
-    make clean 2>/dev/null || true
-    make || error "Build failed. Check that kernel headers are installed."
+
+    if $STOCK_FAN_SUPPORT; then
+        info "Kernel $(uname -r) detected (>= 6.18) — stock hp-wmi already has Omen fan control."
+        info "Only building hp-omen-core (RGB keyboard control)..."
+
+        # Create an RGB-only DKMS config
+        cat > "$SCRIPT_DIR/dkms.conf.auto" <<'DKMSRGB'
+PACKAGE_NAME="hp-omen-core"
+PACKAGE_VERSION="1.0.0"
+MAKE[0]="grep -iq clang /proc/version && make LLVM=1 -C $kernel_source_dir M=$dkms_tree/$module/$module_version/build EXTRA_CFLAGS='' modules || make -C $kernel_source_dir M=$dkms_tree/$module/$module_version/build EXTRA_CFLAGS='' modules"
+CLEAN=true
+BUILT_MODULE_NAME[0]="hp-omen-core"
+DEST_MODULE_LOCATION[0]="/kernel/drivers/platform/x86/hp"
+AUTOINSTALL="yes"
+DKMSRGB
+        # Build only hp-omen-core
+        make clean 2>/dev/null || true
+        make -C /lib/modules/$(uname -r)/build M="$SCRIPT_DIR" obj-m=hp-omen-core.o modules || error "Build failed."
+    else
+        info "Kernel $(uname -r) detected (< 6.18) — installing both hp-wmi and hp-omen-core..."
+        make clean 2>/dev/null || true
+        make || error "Build failed. Check that kernel headers are installed."
+    fi
 
     # Remove old DKMS entry if exists
     if dkms status "$MODNAME/$MODVER" 2>/dev/null | grep -q "$MODNAME"; then
@@ -135,22 +168,75 @@ do_install() {
         dkms remove -m "$MODNAME" -v "$MODVER" --all 2>/dev/null || true
     fi
 
+    # Install via DKMS with the appropriate config
     info "Installing via DKMS..."
+    if $STOCK_FAN_SUPPORT && [ -f "$SCRIPT_DIR/dkms.conf.auto" ]; then
+        # Backup original and use RGB-only config
+        cp "$SCRIPT_DIR/dkms.conf" "$SCRIPT_DIR/dkms.conf.full"
+        cp "$SCRIPT_DIR/dkms.conf.auto" "$SCRIPT_DIR/dkms.conf"
+    fi
     dkms add "$SCRIPT_DIR"
     dkms build -m "$MODNAME" -v "$MODVER"
     dkms install -m "$MODNAME" -v "$MODVER"
+    # Restore original dkms.conf
+    if [ -f "$SCRIPT_DIR/dkms.conf.full" ]; then
+        mv "$SCRIPT_DIR/dkms.conf.full" "$SCRIPT_DIR/dkms.conf"
+        rm -f "$SCRIPT_DIR/dkms.conf.auto"
+    fi
 
-    # Load the module
-    info "Loading module..."
-    rmmod hp_wmi 2>/dev/null || true
-    modprobe led_class_multicolor 2>/dev/null || true
-    modprobe hp_wmi || insmod "$SCRIPT_DIR/hp-wmi.ko"
+    # ── Secure Boot check ───────────────────────────────────────────────────────
+    SECUREBOOT=false
+    if command -v mokutil &>/dev/null; then
+        if mokutil --sb-state 2>/dev/null | grep -qi "SecureBoot enabled"; then
+            SECUREBOOT=true
+        fi
+    fi
 
-    ok "Installation complete!"
+    if $SECUREBOOT; then
+        echo ""
+        echo -e "${YELLOW}╔═══════════════════════════════════════════════════════════╗${NC}"
+        echo -e "${YELLOW}║  ⚠  Secure Boot is ENABLED                               ║${NC}"
+        echo -e "${YELLOW}║                                                           ║${NC}"
+        echo -e "${YELLOW}║  The hp-omen-core module (keyboard RGB control) cannot    ║${NC}"
+        echo -e "${YELLOW}║  be loaded while Secure Boot is active.                   ║${NC}"
+        echo -e "${YELLOW}║                                                           ║${NC}"
+        echo -e "${YELLOW}║  To use keyboard lighting control, please disable         ║${NC}"
+        echo -e "${YELLOW}║  Secure Boot from your BIOS/UEFI settings.               ║${NC}"
+        echo -e "${YELLOW}║                                                           ║${NC}"
+        echo -e "${YELLOW}║  Fan control and other features work normally.            ║${NC}"
+        echo -e "${YELLOW}╚═══════════════════════════════════════════════════════════╝${NC}"
+        echo ""
+        warn "Skipping module load due to Secure Boot. Keyboard RGB will be unavailable."
+    fi
+
+    # Load the modules
+    if $SECUREBOOT; then
+        info "Secure Boot active — skipping module load (hp-omen-core requires Secure Boot disabled)."
+        ok "DKMS installation complete. Modules will load after Secure Boot is disabled and system is rebooted."
+    elif $STOCK_FAN_SUPPORT; then
+        info "Loading modules..."
+        # Only load hp-omen-core; fan control uses stock hp-wmi
+        modprobe led_class_multicolor 2>/dev/null || true
+        if ! modprobe hp_omen_core 2>/dev/null; then
+            insmod "$SCRIPT_DIR/hp-omen-core.ko" 2>/dev/null || warn "hp-omen-core could not be loaded."
+        fi
+        ok "hp-omen-core (RGB) installed. Stock hp-wmi handles fan control."
+    else
+        info "Loading modules..."
+        rmmod hp_wmi 2>/dev/null || true
+        modprobe led_class_multicolor 2>/dev/null || true
+        if ! modprobe hp_wmi 2>/dev/null; then
+            insmod "$SCRIPT_DIR/hp-wmi.ko" || warn "hp-wmi could not be loaded."
+        fi
+        ok "Both hp-wmi and hp-omen-core installed."
+    fi
+
     echo ""
     info "The module will be automatically rebuilt on kernel updates via DKMS."
-    info "Fan control: /sys/devices/platform/hp-wmi/hwmon/hwmon*/pwm1_enable"
-    info "Fan speed:   /sys/devices/platform/hp-wmi/hwmon/hwmon*/fan*_target"
+    if ! $STOCK_FAN_SUPPORT; then
+        info "Fan control: /sys/devices/platform/hp-wmi/hwmon/hwmon*/pwm1_enable"
+        info "Fan speed:   /sys/devices/platform/hp-wmi/hwmon/hwmon*/fan*_target"
+    fi
     echo ""
 }
 

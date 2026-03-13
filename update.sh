@@ -45,9 +45,9 @@ fi
 # 3. Clean and reinstall
 if [ -x "./install.sh" ]; then
     if [ "$LANG_CODE" == "tr" ]; then
-        echo "Yeni sürüm (v1.1.0) kuruluyor..."
+        echo "Yeni sürüm (v1.1.1) kuruluyor..."
     else
-        echo "Installing new version (v1.1.0)..."
+        echo "Installing new version (v1.1.1)..."
     fi
     
     # Also clean up any old build files
@@ -66,7 +66,7 @@ else
 fi
 
 if [ "$LANG_CODE" == "tr" ]; then
-    echo "Güncelleme tamamlandı! Yeni sürümü (v1.1.0) özellikleriyle kullanmaya başlayabilirsiniz."
+    echo "Güncelleme tamamlandı! Yeni sürümü (v1.1.1) özellikleriyle kullanmaya başlayabilirsiniz."
 else
-    echo "Update complete! You can now start using the new version (v1.1.0) and its features."
+    echo "Update complete! You can now start using the new version (v1.1.1) and its features."
 fi

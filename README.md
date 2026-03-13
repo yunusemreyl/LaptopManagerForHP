@@ -1,5 +1,5 @@
 
- # HP Laptop Manager (Linux) v1.1.0 #
+ # HP Laptop Manager (Linux) v1.1.1 #
 <p align="center">
   <img src="images/hplogolight.png" alt="Logo" width="250">
 
@@ -22,7 +22,17 @@
 
 **HP Laptop Manager** is a native Linux application designed to unlock the full potential of HP Omen and Victus series laptops. It serves as an open-source alternative to the official OMEN Gaming Hub, providing essential controls in a modern, user-friendly interface.
 
-**New in v1.1.0:**
+**New in v1.1.1:**
+
+- 🔋 **TLP / auto-cpufreq Support**: The app now detects if TLP or auto-cpufreq is managing power profiles and gracefully disables the built-in power mode controls with a clear notification on both the Dashboard and Fan pages.
+- 🖥️ **GPU MUX Tool Installer**: During installation, if no GPU switching tool (`envycontrol` or `prime-select`) is detected, the installer now offers an interactive menu to install one.
+- 🐞 **Debug Information Panel**: A new "Debug Information" section has been added to the Settings page. Users can copy system info (kernel, modules, service status) to the clipboard with one click for easy troubleshooting.
+- ⚡ **Performance Optimizations**: Reduced unnecessary `systemctl` calls by caching conflict checks. TLP/auto-cpufreq status is now only polled every ~25-50 seconds instead of every refresh cycle.
+- 🔧 **In-App Updater Fix**: The auto-updater now prioritizes `update.sh` when available and uses a simplified, more robust version comparison algorithm.
+
+**Previous Releases:**
+
+**v1.1.0:**
 
 - ✨ **Name Change**: `hp-omen-core` has been renamed to `hp-rgb-lighting` to better reflect its function and support Victus devices appropriately.
 - 🔄 **Kernel 7.0+ Adaptation**: Updated internal checks. Fan control logic defaults to stock `hp-wmi` on kernels >= 7.0, and auto-installs our custom `hp-wmi` module on kernels < 7.0.

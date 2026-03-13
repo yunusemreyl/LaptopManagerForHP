@@ -8,8 +8,8 @@ from gi.repository import GLib
 from pydbus import SystemBus
 
 # --- PATHS ---
-# hp-omen-core sysfs path (custom DKMS module)
-DRIVER_PATH_CUSTOM = "/sys/devices/platform/hp-omen-core"
+# hp-rgb-lighting sysfs path (custom DKMS module)
+DRIVER_PATH_CUSTOM = "/sys/devices/platform/hp-rgb-lighting"
 # Fallback: check if the module is loaded via lsmod
 DRIVER_PATH = DRIVER_PATH_CUSTOM
 CONFIG_FILE = "/etc/hp-manager/state.json"
@@ -213,7 +213,7 @@ class RGBController:
 
     def _find_rgb_path(self):
         """Find the RGB control sysfs path.
-        Checks the custom hp-omen-core platform device first,
+        Checks the custom hp-rgb-lighting platform device first,
         then falls back to lsmod to see if the module is loaded.
         """
         # Custom DKMS module path
@@ -221,23 +221,23 @@ class RGBController:
             logger.info(f"RGB: Using custom driver path {DRIVER_PATH_CUSTOM}")
             return DRIVER_PATH_CUSTOM
 
-        # Check if hp_omen_core module is loaded (stock kernel builds may
+        # Check if hp_rgb_lighting module is loaded (stock kernel builds may
         # use a different platform device path or the LED subsystem)
         try:
             result = subprocess.run(
                 ["lsmod"], capture_output=True, text=True, timeout=5
             )
-            if "hp_omen_core" in result.stdout:
+            if "hp_rgb_lighting" in result.stdout:
                 # Module is loaded but path might differ
-                for candidate in ("/sys/devices/platform/hp-omen-core",
-                                  "/sys/devices/platform/hp_omen_core"):
+                for candidate in ("/sys/devices/platform/hp-rgb-lighting",
+                                  "/sys/devices/platform/hp_rgb_lighting"):
                     if os.path.exists(candidate):
                         logger.info(f"RGB: Found loaded module at {candidate}")
                         return candidate
         except Exception:
             pass
 
-        logger.info("RGB: No RGB control path found (hp-omen-core not loaded)")
+        logger.info("RGB: No RGB control path found (hp-rgb-lighting not loaded)")
         return None
 
     def is_available(self):

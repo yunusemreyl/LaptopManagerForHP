@@ -12,12 +12,12 @@ depends=('glibc' 'dkms')
 makedepends=()
 conflicts=("${_pkgbase}")
 provides=("${_pkgbase}")
-source=('dkms.conf' 'hp-wmi.c' 'hp-omen-core.c' 'Makefile')
+source=('dkms.conf' 'hp-wmi.c' 'hp-rgb-lighting.c' 'Makefile')
 sha256sums=('SKIP' 'SKIP' 'SKIP' 'SKIP')
 
 package() {
 	install -Dm644 'dkms.conf' "${pkgdir}/usr/src/${_pkgbase}-${pkgver}/dkms.conf"
 	install -Dm644 'hp-wmi.c' "${pkgdir}/usr/src/${_pkgbase}-${pkgver}/hp-wmi.c"
-	install -Dm644 'hp-omen-core.c' "${pkgdir}/usr/src/${_pkgbase}-${pkgver}/hp-omen-core.c"
+	install -Dm644 'hp-rgb-lighting.c' "${pkgdir}/usr/src/${_pkgbase}-${pkgver}/hp-rgb-lighting.c"
 	install -Dm644 'Makefile' "${pkgdir}/usr/src/${_pkgbase}-${pkgver}/Makefile"
 }

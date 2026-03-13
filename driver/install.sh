@@ -13,20 +13,19 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-MODNAME="hp-omen-core"
-MODVER=$(grep -oP 'PACKAGE_VERSION="\K[^"]+' dkms.conf 2>/dev/null || echo "1.0.1")
+MODNAME="hp-rgb-lighting"
+MODVER=$(grep -oP 'PACKAGE_VERSION="\K[^"]+' dkms.conf 2>/dev/null || echo "1.1.0")
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # ── Kernel version detection ──────────────────────────────────────────────────
-# Kernel 6.18+ has Omen/Victus fan control in the stock hp-wmi module.
-# On those kernels we only need hp-omen-core (RGB). On older kernels we
-# install both hp-wmi and hp-omen-core.
+# Kernel 7.0+ has Omen/Victus fan control in the stock hp-wmi module.
+# On those kernels we only need hp-rgb-lighting (RGB). On older kernels we
+# install both hp-wmi and hp-rgb-lighting.
 KERNEL_VER=$(uname -r | grep -oP '^\d+\.\d+')
 KERNEL_MAJOR=$(echo "$KERNEL_VER" | cut -d. -f1)
 KERNEL_MINOR=$(echo "$KERNEL_VER" | cut -d. -f2)
 STOCK_FAN_SUPPORT=false
-if [ "$KERNEL_MAJOR" -gt 6 ] 2>/dev/null || \
-   { [ "$KERNEL_MAJOR" -eq 6 ] && [ "$KERNEL_MINOR" -ge 18 ]; } 2>/dev/null; then
+if [ "$KERNEL_MAJOR" -ge 7 ] 2>/dev/null; then
     STOCK_FAN_SUPPORT=true
 fi
 
@@ -140,24 +139,24 @@ do_install() {
     cd "$SCRIPT_DIR"
 
     if $STOCK_FAN_SUPPORT; then
-        info "Kernel $(uname -r) detected (>= 6.18) — stock hp-wmi already has Omen fan control."
-        info "Only building hp-omen-core (RGB keyboard control)..."
+        info "Kernel $(uname -r) detected (>= 7.0) — stock hp-wmi already has Omen fan control."
+        info "Only building hp-rgb-lighting (RGB keyboard control)..."
 
         # Create an RGB-only DKMS config
         cat > "$SCRIPT_DIR/dkms.conf.auto" <<'DKMSRGB'
-PACKAGE_NAME="hp-omen-core"
-PACKAGE_VERSION="1.0.1"
+PACKAGE_NAME="hp-rgb-lighting"
+PACKAGE_VERSION="1.1.0"
 MAKE[0]="grep -iq clang /proc/version && make LLVM=1 -C $kernel_source_dir M=$dkms_tree/$module/$module_version/build EXTRA_CFLAGS='' modules || make -C $kernel_source_dir M=$dkms_tree/$module/$module_version/build EXTRA_CFLAGS='' modules"
 CLEAN=true
-BUILT_MODULE_NAME[0]="hp-omen-core"
+BUILT_MODULE_NAME[0]="hp-rgb-lighting"
 DEST_MODULE_LOCATION[0]="/kernel/drivers/platform/x86/hp"
 AUTOINSTALL="yes"
 DKMSRGB
-        # Build only hp-omen-core
+        # Build only hp-rgb-lighting
         make clean 2>/dev/null || true
-        make -C /lib/modules/$(uname -r)/build M="$SCRIPT_DIR" obj-m=hp-omen-core.o modules || error "Build failed."
+        make -C /lib/modules/$(uname -r)/build M="$SCRIPT_DIR" obj-m=hp-rgb-lighting.o modules || error "Build failed."
     else
-        info "Kernel $(uname -r) detected (< 6.18) — installing both hp-wmi and hp-omen-core..."
+        info "Kernel $(uname -r) detected (< 7.0) — installing both hp-wmi and hp-rgb-lighting..."
         make clean 2>/dev/null || true
         make || error "Build failed. Check that kernel headers are installed."
     fi
@@ -197,7 +196,7 @@ DKMSRGB
         echo -e "${YELLOW}╔═══════════════════════════════════════════════════════════╗${NC}"
         echo -e "${YELLOW}║  ⚠  Secure Boot is ENABLED                               ║${NC}"
         echo -e "${YELLOW}║                                                           ║${NC}"
-        echo -e "${YELLOW}║  The hp-omen-core module (keyboard RGB control) cannot    ║${NC}"
+        echo -e "${YELLOW}║  The hp-rgb-lighting module (keyboard RGB control) cannot ║${NC}"
         echo -e "${YELLOW}║  be loaded while Secure Boot is active.                   ║${NC}"
         echo -e "${YELLOW}║                                                           ║${NC}"
         echo -e "${YELLOW}║  To use keyboard lighting control, please disable         ║${NC}"
@@ -211,16 +210,16 @@ DKMSRGB
 
     # Load the modules
     if $SECUREBOOT; then
-        info "Secure Boot active — skipping module load (hp-omen-core requires Secure Boot disabled)."
+        info "Secure Boot active — skipping module load (hp-rgb-lighting requires Secure Boot disabled)."
         ok "DKMS installation complete. Modules will load after Secure Boot is disabled and system is rebooted."
     elif $STOCK_FAN_SUPPORT; then
         info "Loading modules..."
-        # Only load hp-omen-core; fan control uses stock hp-wmi
+        # Only load hp-rgb-lighting; fan control uses stock hp-wmi
         modprobe led_class_multicolor 2>/dev/null || true
-        if ! modprobe hp_omen_core 2>/dev/null; then
-            insmod "$SCRIPT_DIR/hp-omen-core.ko" 2>/dev/null || warn "hp-omen-core could not be loaded."
+        if ! modprobe hp_rgb_lighting 2>/dev/null; then
+            insmod "$SCRIPT_DIR/hp-rgb-lighting.ko" 2>/dev/null || warn "hp-rgb-lighting could not be loaded."
         fi
-        ok "hp-omen-core (RGB) installed. Stock hp-wmi handles fan control."
+        ok "hp-rgb-lighting (RGB) installed. Stock hp-wmi handles fan control."
     else
         info "Loading modules..."
         rmmod hp_wmi 2>/dev/null || true
@@ -228,7 +227,7 @@ DKMSRGB
         if ! modprobe hp_wmi 2>/dev/null; then
             insmod "$SCRIPT_DIR/hp-wmi.ko" || warn "hp-wmi could not be loaded."
         fi
-        ok "Both hp-wmi and hp-omen-core installed."
+        ok "Both hp-wmi and hp-rgb-lighting installed."
     fi
 
     echo ""

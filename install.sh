@@ -250,38 +250,37 @@ LAUNCHER
     log "Omen Key handler installed (system service)"
 
     # ── Driver module management ──
-    # Enable automatic loading of hp-omen-core on boot
-    MODULES_LOAD_FILE="/etc/modules-load.d/hp-omen-core.conf"
+    # Enable automatic loading of hp-rgb-lighting on boot
+    MODULES_LOAD_FILE="/etc/modules-load.d/hp-rgb-lighting.conf"
     cat > "$MODULES_LOAD_FILE" << 'MODCONF'
 # HP Laptop Manager: load the companion driver for Omen/Victus
-hp-omen-core
+hp-rgb-lighting
 MODCONF
     # Remove old blacklist if it exists
-    rm -f /etc/modprobe.d/hp-omen-core.conf 2>/dev/null || true
-    log "hp-omen-core set to load on boot ($MODULES_LOAD_FILE)"
+    rm -f /etc/modprobe.d/hp-rgb-lighting.conf 2>/dev/null || true
+    log "hp-rgb-lighting set to load on boot ($MODULES_LOAD_FILE)"
 
     # Detect kernel version for smart module management
     _KERN_VER=$(uname -r | grep -oP '^\d+\.\d+')
     _KERN_MAJOR=$(echo "$_KERN_VER" | cut -d. -f1)
     _KERN_MINOR=$(echo "$_KERN_VER" | cut -d. -f2)
     _STOCK_FAN=false
-    if [ "$_KERN_MAJOR" -gt 6 ] 2>/dev/null || \
-       { [ "$_KERN_MAJOR" -eq 6 ] && [ "$_KERN_MINOR" -ge 18 ]; } 2>/dev/null; then
+    if [ "$_KERN_MAJOR" -ge 7 ] 2>/dev/null; then
         _STOCK_FAN=true
     fi
 
     if $_STOCK_FAN; then
-        # Kernel 6.18+: stock hp-wmi already has Omen fan control
-        info "Kernel $(uname -r) (>= 6.18): using stock hp-wmi for fan control."
-        # Only load hp-omen-core for RGB
-        rmmod hp_omen_core 2>/dev/null || true
-        modprobe hp-omen-core 2>/dev/null || true
+        # Kernel 7.0+: stock hp-wmi already has Omen fan control
+        info "Kernel $(uname -r) (>= 7.0): using stock hp-wmi for fan control."
+        # Only load hp-rgb-lighting for RGB
+        rmmod hp_rgb_lighting 2>/dev/null || true
+        modprobe hp-rgb-lighting 2>/dev/null || true
     else
-        # Kernel < 6.18: replace stock module with custom one
+        # Kernel < 7.0: replace stock module with custom one
         rmmod hp_wmi 2>/dev/null || true
-        rmmod hp_omen_core 2>/dev/null || true
+        rmmod hp_rgb_lighting 2>/dev/null || true
         modprobe hp-wmi 2>/dev/null || true
-        modprobe hp-omen-core 2>/dev/null || true
+        modprobe hp-rgb-lighting 2>/dev/null || true
     fi
 
     # Enable and start daemon
@@ -368,7 +367,7 @@ case "${1:-install}" in
             echo -e "${YELLOW}╔═══════════════════════════════════════════════════════════╗${NC}"
             echo -e "${YELLOW}║  ⚠  Secure Boot is ENABLED                               ║${NC}"
             echo -e "${YELLOW}║                                                           ║${NC}"
-            echo -e "${YELLOW}║  Keyboard RGB control (hp-omen-core) is unavailable.     ║${NC}"
+            echo -e "${YELLOW}║  Keyboard RGB control (hp-rgb-lighting) is unavailable.  ║${NC}"
             echo -e "${YELLOW}║  Disable Secure Boot in BIOS to use keyboard lighting.   ║${NC}"
             echo -e "${YELLOW}║  All other features work normally.                        ║${NC}"
             echo -e "${YELLOW}╚═══════════════════════════════════════════════════════════╝${NC}"

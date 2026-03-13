@@ -16,7 +16,7 @@ def T(k):
     return _T(k)
 
 
-APP_VERSION = "1.0.1"
+APP_VERSION = "1.1.0"
 GITHUB_REPO = "yunusemreyl/LaptopManagerForHP"
 GITHUB_API_URL = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 GITHUB_RELEASES_URL = f"https://github.com/{GITHUB_REPO}/releases/latest"
@@ -153,10 +153,10 @@ class SettingsPage(Gtk.Box):
         driver_card.add_css_class("card")
         driver_card.append(Gtk.Label(label=T("driver_status"), xalign=0, css_classes=["section-title"]))
 
-        hp_omen_core_loaded = self._is_module_loaded("hp_omen_core")
+        hp_rgb_lighting_loaded = self._is_module_loaded("hp_rgb_lighting")
         hp_wmi_loaded = self._is_module_loaded("hp_wmi")
 
-        drivers = [("hp-omen-core", hp_omen_core_loaded), ("hp-wmi (Fan/Thermal/Key)", hp_wmi_loaded)]
+        drivers = [("hp-rgb-lighting", hp_rgb_lighting_loaded), ("hp-wmi (Fan/Thermal/Key)", hp_wmi_loaded)]
         for name, loaded in drivers:
             row = Gtk.Box(spacing=20)
             row.append(Gtk.Label(label=name, hexpand=True, xalign=0))
@@ -188,6 +188,22 @@ class SettingsPage(Gtk.Box):
         about_header.append(about_text)
         about_card.append(about_header)
         content.append(about_card)
+        # ── Debug Log ──
+        debug_card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=15)
+        debug_card.add_css_class("card")
+        
+        debug_hdr = Gtk.Box(spacing=15)
+        debug_info_lbl = Gtk.Label(label=T("debug_info_desc") or "If you encounter errors, please copy the debug logs and share them with the developer.", wrap=True, hexpand=True, xalign=0)
+        debug_hdr.append(debug_info_lbl)
+        
+        copy_debug_btn = Gtk.Button(label=T("copy_debug_log") or "Copy Debug Info")
+        copy_debug_btn.add_css_class("profile-btn")
+        copy_debug_btn.connect("clicked", self._copy_debug_log)
+        
+        debug_card.append(Gtk.Label(label="Debug Information", xalign=0, css_classes=["section-title"]))
+        debug_card.append(debug_hdr)
+        debug_card.append(copy_debug_btn)
+        content.append(debug_card)
 
         scroll.set_child(content)
         self.append(scroll)
@@ -299,10 +315,12 @@ class SettingsPage(Gtk.Box):
                 raise RuntimeError("No directory found in tarball")
             src_dir = os.path.join(tmp_dir, extracted_dirs[0])
 
-            # Step 3: Run install.sh via pkexec
-            install_script = os.path.join(src_dir, "install.sh")
+            # Step 3: Run update.sh via pkexec (or install.sh fallback)
+            install_script = os.path.join(src_dir, "update.sh")
             if not os.path.exists(install_script):
-                raise RuntimeError(f"install.sh not found in {src_dir}")
+                install_script = os.path.join(src_dir, "install.sh")
+                if not os.path.exists(install_script):
+                    raise RuntimeError(f"update.sh or install.sh not found in {src_dir}")
 
             os.chmod(install_script, 0o755)
             GLib.idle_add(self._install_progress, 0.6, T("installing_update"))
@@ -371,44 +389,31 @@ class SettingsPage(Gtk.Box):
 
     @staticmethod
     def _version_compare(v1, v2):
-        """Compare two version strings. Returns >0 if v1>v2, <0 if v1<v2, 0 if equal.
-        Handles pre-release tags: '1.0.0-rc2' < '1.0.0' (release).
-        Legacy handling: old 2-segment versions (e.g. '4.8') are always
-        considered older than 3-segment SemVer versions (e.g. '1.0.0')
-        to support the v4.x → v1.0.0 migration."""
+        """Compare two version strings (basic semantic).
+        Returns >0 if v1>v2, <0 if v1<v2, 0 if equal.
+        """
         import re
         def parse(v):
-            # Split into numeric part and optional pre-release suffix
-            m = re.match(r'^([\d.]+)(?:-(.+))?$', v.strip())
+            v = str(v).strip()
+            # extract dots and digits
+            m = re.match(r'^([\d.]+)', v)
             if not m:
-                return ([0], '', False)
-            nums = [int(x) for x in m.group(1).split('.') if x.isdigit()]
-            pre = m.group(2) or ''  # empty string = release (higher than any pre-release)
-            is_legacy = len(nums) <= 2  # old versioning: "4.8" style
-            return (nums, pre, is_legacy)
-        n1, pre1, leg1 = parse(v1)
-        n2, pre2, leg2 = parse(v2)
-        # Legacy migration: 2-segment (old) is always < 3-segment (SemVer)
-        if leg1 and not leg2:
-            return -1  # v1 is legacy, v2 is SemVer → v1 < v2
-        if not leg1 and leg2:
-            return 1   # v1 is SemVer, v2 is legacy → v1 > v2
-        # Compare numeric parts first
+                return [0]
+            return [int(x) for x in m.group(1).split('.') if x]
+        
+        n1 = parse(v1)
+        n2 = parse(v2)
+        
+        # pad to same length
+        maxlen = max(len(n1), len(n2))
+        n1.extend([0] * (maxlen - len(n1)))
+        n2.extend([0] * (maxlen - len(n2)))
+        
         for a, b in zip(n1, n2):
-            if a != b:
-                return a - b
-        if len(n1) != len(n2):
-            return len(n1) - len(n2)
-        # Same numeric version: release (no pre) > pre-release
-        if not pre1 and pre2:
-            return 1   # v1 is release, v2 is pre-release
-        if pre1 and not pre2:
-            return -1  # v1 is pre-release, v2 is release
-        # Both have pre-release tags: compare lexicographically
-        if pre1 < pre2:
-            return -1
-        if pre1 > pre2:
-            return 1
+            if a > b:
+                return 1
+            if a < b:
+                return -1
         return 0
 
     # ── Theme / Lang ──
@@ -471,3 +476,35 @@ class SettingsPage(Gtk.Box):
                             return line.split("=", 1)[1].strip().strip('"')
             except Exception: pass
         return "Linux"
+
+    def _copy_debug_log(self, btn):
+        err_text = self._gather_debug_info()
+        self.get_clipboard().set(err_text)
+        btn.set_label(T("copied_to_clipboard") or "Copied to Clipboard!")
+        GLib.timeout_add(2000, lambda: btn.set_label(T("copy_debug_log") or "Copy Debug Info") or False)
+        
+    def _gather_debug_info(self):
+        import platform, subprocess
+        out = [f"HP Laptop Manager Version: {APP_VERSION}"]
+        out.append(f"OS Default: {self._get_distro()}")
+        out.append(f"Kernel: {platform.release()}")
+        out.append(f"python_version: {platform.python_version()}")
+        out.append("Loaded Modules:")
+        try:
+            lsmod_out = subprocess.check_output(["lsmod"], stderr=subprocess.DEVNULL, timeout=2).decode(errors='ignore')
+            for mod in ('hp_wmi', 'hp_rgb_lighting', 'hp_omen_core'):
+                if mod in lsmod_out:
+                    out.append(f"  - {mod}: Yes")
+                else:
+                    out.append(f"  - {mod}: No")
+        except Exception:
+            pass
+        out.append("Service Status:")
+        try:
+            status = subprocess.check_output(["systemctl", "status", "hp-manager.service"], stderr=subprocess.STDOUT, timeout=2).decode(errors='ignore')
+            lines = status.splitlines()
+            for i in range(min(5, len(lines))):
+                out.append(f"  {lines[i].strip()}")
+        except Exception as e:
+            out.append(f"  Error: {e}")
+        return "\n".join(out)

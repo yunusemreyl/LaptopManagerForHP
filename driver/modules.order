@@ -1,1 +1,2 @@
-hp-omen-core.o
+hp-wmi.o
+hp-rgb-lighting.o

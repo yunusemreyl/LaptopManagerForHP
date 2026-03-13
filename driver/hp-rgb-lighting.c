@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 /*
- * hp-omen-core — Companion driver for HP Omen/Victus RGB keyboard backlight.
+ * hp-rgb-lighting — Companion driver for HP Omen/Victus RGB keyboard backlight.
  *
  * Works alongside the stock hp-wmi driver (which handles fan hwmon,
  * hotkeys, thermal profiles, rfkill).  This module only manages the
  * per-zone RGB colour of the keyboard backlight via WMI.
  *
- * Copyright (C) 2024 Yunus Emre <yunusemreyl>
+ * Copyright (C) 2024 Yunus Emre YILMAZ <yunusemreyl>
  *
  * Based on hp-wmi.c by Matthew Garrett and Anssi Hannula, and on
  * hp-omen-rgb by yunusemreyl.
@@ -136,8 +136,8 @@ out_free:
 
 /* ══════════════════════════════════════════════════════════════════
  * RGB ZONE SYSFS  (zone0 … zone3)
- * echo "FF0000" > /sys/devices/platform/hp-omen-core/zone0
- * cat  /sys/devices/platform/hp-omen-core/zone0   → "FF0000"
+ * echo "FF0000" > /sys/devices/platform/hp-rgb-lighting/zone0
+ * cat  /sys/devices/platform/hp-rgb-lighting/zone0   → "FF0000"
  * ══════════════════════════════════════════════════════════════════ */
 #define RGB_ZONE_COUNT 4
 #define COLOR_TABLE_SIZE 128
@@ -235,41 +235,41 @@ static DEVICE_ATTR(zone2, 0644, zone_show, zone_store);
 static DEVICE_ATTR(zone3, 0644, zone_show, zone_store);
 static DEVICE_ATTR_RW(brightness);
 
-static struct attribute *hp_omen_attrs[] = {
+static struct attribute *hp_rgb_lighting_attrs[] = {
     &dev_attr_zone0.attr, &dev_attr_zone1.attr,      &dev_attr_zone2.attr,
     &dev_attr_zone3.attr, &dev_attr_brightness.attr, NULL,
 };
-ATTRIBUTE_GROUPS(hp_omen);
+ATTRIBUTE_GROUPS(hp_rgb_lighting);
 
 /* ══════════════════════════════════════════════════════════════════
  * PLATFORM DEVICE
  * ══════════════════════════════════════════════════════════════════ */
-static struct platform_device *hp_omen_pdev;
+static struct platform_device *hp_rgb_lighting_pdev;
 
-static int __init hp_omen_core_init(void) {
+static int __init hp_rgb_lighting_init(void) {
   int ret;
 
-  pr_info("hp-omen-core: init starting...\n");
+  pr_info("hp-rgb-lighting: init starting...\n");
 
   if (!wmi_has_guid(HPWMI_BIOS_GUID)) {
     pr_info("HP WMI BIOS GUID not found — not an HP system?\n");
     return -ENODEV;
   }
-  pr_info("hp-omen-core: WMI GUID found OK\n");
+  pr_info("hp-rgb-lighting: WMI GUID found OK\n");
 
-  hp_omen_pdev = platform_device_register_simple("hp-omen-core",
+  hp_rgb_lighting_pdev = platform_device_register_simple("hp-rgb-lighting",
                                                  PLATFORM_DEVID_NONE, NULL, 0);
-  if (IS_ERR(hp_omen_pdev)) {
-    pr_err("hp-omen-core: platform_device_register_simple failed: %ld\n",
-           PTR_ERR(hp_omen_pdev));
-    return PTR_ERR(hp_omen_pdev);
+  if (IS_ERR(hp_rgb_lighting_pdev)) {
+    pr_err("hp-rgb-lighting: platform_device_register_simple failed: %ld\n",
+           PTR_ERR(hp_rgb_lighting_pdev));
+    return PTR_ERR(hp_rgb_lighting_pdev);
   }
-  pr_info("hp-omen-core: platform device registered OK\n");
+  pr_info("hp-rgb-lighting: platform device registered OK\n");
 
-  ret = sysfs_create_groups(&hp_omen_pdev->dev.kobj, hp_omen_groups);
+  ret = sysfs_create_groups(&hp_rgb_lighting_pdev->dev.kobj, hp_rgb_lighting_groups);
   if (ret) {
-    pr_err("hp-omen-core: sysfs_create_groups failed: %d\n", ret);
-    platform_device_unregister(hp_omen_pdev);
+    pr_err("hp-rgb-lighting: sysfs_create_groups failed: %d\n", ret);
+    platform_device_unregister(hp_rgb_lighting_pdev);
     return ret;
   }
 
@@ -277,11 +277,11 @@ static int __init hp_omen_core_init(void) {
   return 0;
 }
 
-static void __exit hp_omen_core_exit(void) {
-  sysfs_remove_groups(&hp_omen_pdev->dev.kobj, hp_omen_groups);
-  platform_device_unregister(hp_omen_pdev);
+static void __exit hp_rgb_lighting_exit(void) {
+  sysfs_remove_groups(&hp_rgb_lighting_pdev->dev.kobj, hp_rgb_lighting_groups);
+  platform_device_unregister(hp_rgb_lighting_pdev);
   pr_info("HP Omen/Victus RGB companion driver unloaded\n");
 }
 
-module_init(hp_omen_core_init);
-module_exit(hp_omen_core_exit);
+module_init(hp_rgb_lighting_init);
+module_exit(hp_rgb_lighting_exit);

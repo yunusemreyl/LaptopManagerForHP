@@ -1,7 +1,7 @@
 
 # Module names — both built together
 obj-m += hp-wmi.o
-obj-m += hp-omen-core.o
+obj-m += hp-rgb-lighting.o
 
 # Kernel build directory
 KDIR := /lib/modules/$(shell uname -r)/build
@@ -43,7 +43,7 @@ install-arch:
 
 uninstall:
 	rm -f /lib/modules/$(shell uname -r)/extra/hp-wmi.ko
-	rm -f /lib/modules/$(shell uname -r)/extra/hp-omen-core.ko
+	rm -f /lib/modules/$(shell uname -r)/extra/hp-rgb-lighting.ko
 	depmod -a
 
 uninstall-dkms:

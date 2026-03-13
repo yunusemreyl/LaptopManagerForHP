@@ -1,1 +1,0 @@
-savedcmd_hp-omen-core.ko := ld -r -m elf_x86_64 -z noexecstack --no-warn-rwx-segments --build-id=sha1  -T /usr/lib/modules/7.0.0-rc3-1-cachyos-rc-gcc/build/scripts/module.lds -o hp-omen-core.ko hp-omen-core.o hp-omen-core.mod.o .module-common.o

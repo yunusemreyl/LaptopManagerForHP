@@ -4,3 +4,18 @@ __pycache__/
 *.swp
 *.bak
 .context/
+
+# Kernel build artifacts
+*.o
+*.ko
+*.mod
+*.mod.c
+*.mod.o
+.*.cmd
+modules.order
+Module.symvers
+.tmp_versions/
+*.pkg.tar.zst
+*.tar.gz
+build.log
+dkms.conf.auto

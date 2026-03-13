@@ -190,6 +190,93 @@ install_app() {
     LANG_CHOICE=${LANG_CHOICE:-0}
     echo ""
 
+    # ── GPU Switching Tool Selection ──
+    _HAS_PRIME=$(command -v prime-select 2>/dev/null && echo 1 || echo 0)
+    _HAS_ENVY=$(command -v envycontrol 2>/dev/null && echo 1 || echo 0)
+
+    if [ "$_HAS_PRIME" -eq 0 ] && [ "$_HAS_ENVY" -eq 0 ]; then
+        echo ""
+        if [ "$LANG_CODE" == "tr" ]; then
+            echo -e "${CYAN}╔═══════════════════════════════════════════╗${NC}"
+            echo -e "${CYAN}║   GPU Switching Aracı Seçimi               ║${NC}"
+            echo -e "${CYAN}╠═══════════════════════════════════════════╣${NC}"
+            echo -e "${CYAN}║  0) Hiçbiri (varsayılan)                   ║${NC}"
+            echo -e "${CYAN}║  1) envycontrol (önerilen, tüm dağıtımlar) ║${NC}"
+            echo -e "${CYAN}║  2) prime-select (sadece Ubuntu/Mint)      ║${NC}"
+            echo -e "${CYAN}╚═══════════════════════════════════════════╝${NC}"
+            echo ""
+            echo -e "${YELLOW}Not: NVIDIA dGPU yoksa veya GPU modları ile${NC}"
+            echo -e "${YELLOW}ilgilenmiyorsanız 0 (Hiçbiri) seçebilirsiniz.${NC}"
+        else
+            echo -e "${CYAN}╔═══════════════════════════════════════════╗${NC}"
+            echo -e "${CYAN}║   GPU Switching Tool Selection             ║${NC}"
+            echo -e "${CYAN}╠═══════════════════════════════════════════╣${NC}"
+            echo -e "${CYAN}║  0) None (default)                         ║${NC}"
+            echo -e "${CYAN}║  1) envycontrol (recommended, all distros) ║${NC}"
+            echo -e "${CYAN}║  2) prime-select (Ubuntu/Mint only)        ║${NC}"
+            echo -e "${CYAN}╚═══════════════════════════════════════════╝${NC}"
+            echo ""
+            echo -e "${YELLOW}Note: If you don't have an NVIDIA dGPU or${NC}"
+            echo -e "${YELLOW}don't need GPU mode switching, choose 0.${NC}"
+        fi
+        echo ""
+        read -t 15 -p "Select [0-2, default=0]: " MUX_CHOICE || MUX_CHOICE=0
+        MUX_CHOICE=${MUX_CHOICE:-0}
+        echo ""
+
+        case $MUX_CHOICE in
+            1)
+                info "Installing envycontrol..."
+                case $PM in
+                    pacman)
+                        # Try from AUR helper or pip
+                        if command -v yay &>/dev/null; then
+                            sudo -u "${SUDO_USER:-$USER}" yay -S --noconfirm envycontrol 2>/dev/null || pip install envycontrol 2>/dev/null || true
+                        elif command -v paru &>/dev/null; then
+                            sudo -u "${SUDO_USER:-$USER}" paru -S --noconfirm envycontrol 2>/dev/null || pip install envycontrol 2>/dev/null || true
+                        else
+                            pip install envycontrol 2>/dev/null || true
+                        fi
+                        ;;
+                    apt)
+                        pip install envycontrol 2>/dev/null || pip3 install envycontrol 2>/dev/null || true
+                        ;;
+                    dnf)
+                        pip install envycontrol 2>/dev/null || pip3 install envycontrol 2>/dev/null || true
+                        ;;
+                    *)
+                        pip install envycontrol 2>/dev/null || pip3 install envycontrol 2>/dev/null || true
+                        ;;
+                esac
+                if command -v envycontrol &>/dev/null; then
+                    log "envycontrol installed successfully!"
+                else
+                    warn "envycontrol installation failed. You can install it manually later."
+                fi
+                ;;
+            2)
+                info "Installing prime-select..."
+                case $PM in
+                    apt)
+                        $INSTALL_CMD nvidia-prime 2>/dev/null || true
+                        ;;
+                    *)
+                        warn "prime-select is only available on Ubuntu/Mint with apt. Skipping."
+                        ;;
+                esac
+                ;;
+            *)
+                info "No GPU switching tool will be installed."
+                ;;
+        esac
+    else
+        if [ "$_HAS_ENVY" -eq 1 ]; then
+            log "GPU switching tool found: envycontrol"
+        elif [ "$_HAS_PRIME" -eq 1 ]; then
+            log "GPU switching tool found: prime-select"
+        fi
+    fi
+
     # Copy daemon
     cp -r src/daemon/* "$INSTALL_DIR/"
     log "$(msg daemon_installed $INSTALL_DIR)"

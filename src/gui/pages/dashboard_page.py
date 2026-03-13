@@ -133,6 +133,8 @@ class DashboardPage(Gtk.Box):
         self._data = {}             # latest bg-fetched snapshot
         self._busy = False          # guard against overlapping bg threads
         self._temp_unit = "C"       # temperature unit preference
+        self._conflict_cache = None  # cached TLP/auto-cpufreq result
+        self._conflict_counter = 0   # check conflict every 10 cycles
 
         global _NVIDIA_SMI
         if _NVIDIA_SMI is None:
@@ -555,18 +557,21 @@ class DashboardPage(Gtk.Box):
             except Exception:
                 pass
 
-        # ── Power tool conflict check ─────────────────────────────────────
-        d["power_conflict"] = None
-        for tool in ("tlp", "auto-cpufreq"):
-            try:
-                # Check if service is active
-                res = subprocess.run(["systemctl", "is-active", f"{tool}.service"], 
-                                     capture_output=True, text=True)
-                if res.stdout.strip() == "active":
-                    d["power_conflict"] = tool
-                    break
-            except Exception:
-                pass
+        # ── Power tool conflict check (cached, every 10 cycles) ────────────
+        self._conflict_counter += 1
+        if self._conflict_counter >= 10:
+            self._conflict_counter = 0
+            self._conflict_cache = None
+            for tool in ("tlp", "auto-cpufreq"):
+                try:
+                    res = subprocess.run(["systemctl", "is-active", f"{tool}.service"],
+                                         capture_output=True, text=True, timeout=2)
+                    if res.stdout.strip() == "active":
+                        self._conflict_cache = tool
+                        break
+                except Exception:
+                    pass
+        d["power_conflict"] = self._conflict_cache
 
         self._data = d
         GLib.idle_add(self._apply)

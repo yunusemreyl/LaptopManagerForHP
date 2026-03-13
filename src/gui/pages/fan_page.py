@@ -217,6 +217,8 @@ class SystemMonitor(threading.Thread):
             "all_sensors": [],
             "power_conflict": None,
         }
+        self._conflict_cache = None
+        self._conflict_counter = 0
 
     def run(self):
         while self.running:
@@ -239,17 +241,20 @@ class SystemMonitor(threading.Thread):
 
             sensors = self._get_all_sensors()
 
-            # Check for TLP / auto-cpufreq conflict
-            conflict = None
-            for tool in ("tlp", "auto-cpufreq"):
-                try:
-                    res = subprocess.run(["systemctl", "is-active", f"{tool}.service"],
-                                         capture_output=True, text=True, timeout=2)
-                    if res.stdout.strip() == "active":
-                        conflict = tool
-                        break
-                except Exception:
-                    pass
+            # Check for TLP / auto-cpufreq conflict (cached, every 10 cycles ~25s)
+            self._conflict_counter += 1
+            if self._conflict_counter >= 10:
+                self._conflict_counter = 0
+                self._conflict_cache = None
+                for tool in ("tlp", "auto-cpufreq"):
+                    try:
+                        res = subprocess.run(["systemctl", "is-active", f"{tool}.service"],
+                                             capture_output=True, text=True, timeout=2)
+                        if res.stdout.strip() == "active":
+                            self._conflict_cache = tool
+                            break
+                    except Exception:
+                        pass
 
             with self.lock:
                 self.data["cpu_temp"] = c
@@ -257,7 +262,7 @@ class SystemMonitor(threading.Thread):
                 self.data["fan_info"] = fi
                 self.data["power_profile"] = pp
                 self.data["all_sensors"] = sensors
-                self.data["power_conflict"] = conflict
+                self.data["power_conflict"] = self._conflict_cache
                 
             time.sleep(2.5)
 

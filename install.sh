@@ -113,6 +113,12 @@ fi
 
 # --- DETECT PACKAGE MANAGER ---
 detect_pm() {
+    # Show detected distro for debugging
+    if [ -f /etc/os-release ]; then
+        _DISTRO_NAME=$(. /etc/os-release && echo "${PRETTY_NAME:-$NAME}")
+        info "Detected distro: $_DISTRO_NAME"
+    fi
+
     if [ -f /etc/fedora-release ] || [ -f /etc/nobara-release ] || command -v dnf &>/dev/null; then
         PM="dnf"
         INSTALL_CMD="dnf install -y"

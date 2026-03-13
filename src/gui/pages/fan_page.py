@@ -215,6 +215,7 @@ class SystemMonitor(threading.Thread):
             "fan_info": dict(),
             "power_profile": dict(),
             "all_sensors": [],
+            "power_conflict": None,
         }
 
     def run(self):
@@ -238,12 +239,25 @@ class SystemMonitor(threading.Thread):
 
             sensors = self._get_all_sensors()
 
+            # Check for TLP / auto-cpufreq conflict
+            conflict = None
+            for tool in ("tlp", "auto-cpufreq"):
+                try:
+                    res = subprocess.run(["systemctl", "is-active", f"{tool}.service"],
+                                         capture_output=True, text=True, timeout=2)
+                    if res.stdout.strip() == "active":
+                        conflict = tool
+                        break
+                except Exception:
+                    pass
+
             with self.lock:
                 self.data["cpu_temp"] = c
                 self.data["gpu_temp"] = g
                 self.data["fan_info"] = fi
                 self.data["power_profile"] = pp
                 self.data["all_sensors"] = sensors
+                self.data["power_conflict"] = conflict
                 
             time.sleep(2.5)
 
@@ -516,6 +530,12 @@ class FanPage(Gtk.Box):
         perf_card.append(self.profile_box)
         self.pp_status = Gtk.Label(label=T("checking"), css_classes=["stat-lbl"])
         perf_card.append(self.pp_status)
+
+        # TLP / auto-cpufreq conflict warning
+        self._pp_conflict_lbl = Gtk.Label(label="", use_markup=True, xalign=0.5, wrap=True)
+        self._pp_conflict_lbl.add_css_class("warning-text")
+        self._pp_conflict_lbl.set_visible(False)
+        perf_card.append(self._pp_conflict_lbl)
 
         perf_card.append(Gtk.Separator())
 
@@ -805,6 +825,18 @@ class FanPage(Gtk.Box):
         
         if active_profile:
              self.pp_status.set_label(f"{T('active_profile')}: {active_profile}")
+
+        # Handle TLP / auto-cpufreq conflict
+        conflict = data.get("power_conflict")
+        if conflict:
+            self.profile_box.set_sensitive(False)
+            self._pp_conflict_lbl.set_label(
+                f"<span color='#57e389'>{T('power_managed_by').format(tool=conflict.upper())}</span>")
+            self._pp_conflict_lbl.set_visible(True)
+            self.pp_status.set_label(f"{T('active_profile')}: {conflict.upper()}")
+        else:
+            self.profile_box.set_sensitive(True)
+            self._pp_conflict_lbl.set_visible(False)
 
         # Sync Fan Data
         available = fan_info.get("available", False)

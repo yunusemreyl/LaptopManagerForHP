@@ -625,11 +625,12 @@ class DashboardPage(Gtk.Box):
                     btn.set_active(True)
                     self._block_perf_sync = False
 
-        # Handle power tool conflicts
+        # Handle power tool conflicts (TLP, auto-cpufreq)
         conflict = d.get("power_conflict")
         if conflict:
+            self._pills["power"].set_label(f"{conflict.upper()}")
             self._perf_strip.set_sensitive(False)
-            self._conflict_lbl.set_label(f"<span color='green'>{T('power_managed_by').format(tool=conflict.upper())}</span>")
+            self._conflict_lbl.set_label(f"<span color='#57e389'>{T('power_managed_by').format(tool=conflict.upper())}</span>")
             self._conflict_lbl.set_visible(True)
         else:
             self._perf_strip.set_sensitive(True)

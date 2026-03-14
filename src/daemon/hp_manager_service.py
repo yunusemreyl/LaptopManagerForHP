@@ -254,7 +254,6 @@ class PowerProfileController:
         self.bus = SystemBus()
         self.proxy = None
 
-        # Try Tuned first (Fedora default)
         try:
             self.proxy = self.bus.get(self.TUNED_BUS, self.TUNED_PATH)
             self.proxy.active_profile()
@@ -323,6 +322,8 @@ class MUXController:
         self.supergfxctl  = shutil.which("supergfxctl")
         self.prime_select = shutil.which("prime-select")
         self.backend: typing.Optional[str] = None
+        self._cached_mode = "unknown"
+        self._last_check = 0.0
         self._detect_backend()
 
     def _detect_backend(self):
@@ -340,19 +341,25 @@ class MUXController:
         return self.backend or "none"
 
     def get_mode(self):
+        now = time.time()
+        # MUX modu sürekli alt süreç çalıştırmaması için 10 saniye cachelendi
+        if now - self._last_check < 10.0:
+            return self._cached_mode
+
+        mode = "unknown"
         try:
             if self.backend == "envycontrol" and self.envycontrol:
-                return subprocess.check_output([self.envycontrol, "--query"],
-                                               stderr=subprocess.STDOUT, timeout=5).decode().strip().lower()
+                mode = subprocess.check_output([self.envycontrol, "--query"], stderr=subprocess.STDOUT, timeout=5).decode().strip().lower()
             elif self.backend == "supergfxctl" and self.supergfxctl:
-                return subprocess.check_output([self.supergfxctl, "-g"],
-                                               stderr=subprocess.STDOUT, timeout=5).decode().strip().lower()
+                mode = subprocess.check_output([self.supergfxctl, "-g"], stderr=subprocess.STDOUT, timeout=5).decode().strip().lower()
             elif self.backend == "prime-select" and self.prime_select:
-                return subprocess.check_output([self.prime_select, "query"],
-                                               stderr=subprocess.STDOUT, timeout=5).decode().strip().lower()
+                mode = subprocess.check_output([self.prime_select, "query"], stderr=subprocess.STDOUT, timeout=5).decode().strip().lower()
         except Exception:
             pass
-        return "unknown"
+
+        self._cached_mode = mode
+        self._last_check = now
+        return mode
 
     def set_mode(self, mode):
         try:
@@ -399,7 +406,7 @@ class AnimationEngine(threading.Thread):
                 self.rgb.write_brightness(False)
                 self.rgb.write_all(["000000"] * 8)
                 state_changed.clear()
-                state_changed.wait() # Kapalıyken sonsuza kadar uyur
+                state_changed.wait() 
                 continue
 
             self.rgb.write_brightness(True)
@@ -413,7 +420,7 @@ class AnimationEngine(threading.Thread):
                     for r, g, b in targets
                 ])
                 state_changed.clear()
-                state_changed.wait() # Statik renkteyken işlem biter bitmez uyur
+                state_changed.wait() 
                 continue
                 
             elif mode == "breathing":
@@ -437,7 +444,6 @@ class AnimationEngine(threading.Thread):
             ])
 
             sleep_time = max(self.FRAME_TIME - (time.time() - loop_start), 0.001)
-            # Eğer bekleme sırasında bir event tetiklenirse, bekleme kırılır ve anında tepki verir
             if state_changed.wait(timeout=sleep_time):
                 state_changed.clear()
 
@@ -494,7 +500,6 @@ def save_state():
             return
     try:
         os.makedirs(os.path.dirname(CONFIG_FILE), exist_ok=True)
-        # Atomik yazma işlemi eklendi
         temp_file = f"{CONFIG_FILE}.tmp"
         with open(temp_file, "w") as f:
             json.dump(snapshot, f)
@@ -502,7 +507,7 @@ def save_state():
     except Exception as e:
         logger.error(f"State save error: {e}")
     finally:
-        state_changed.set()  # Durum kaydedildiğinde animasyon motorunu uyandır
+        state_changed.set()
 
 
 def load_state():
@@ -553,13 +558,10 @@ def load_state():
             if isinstance(pp, str) and pp in ("power-saver", "balanced", "performance"):
                 state["power_profile"] = pp
 
-            # --- Keyboard fixes ---
             if isinstance(loaded.get("prtsc_fix"), bool):
                 state["prtsc_fix"] = loaded["prtsc_fix"]
             if isinstance(loaded.get("f1_fix"), bool):
                 state["f1_fix"] = loaded["f1_fix"]
-
-            # --- Win lock ---
             if isinstance(loaded.get("win_lock"), bool):
                 state["win_lock"] = loaded["win_lock"]
 
@@ -593,6 +595,53 @@ class HPManagerService(object):
       </interface>
     </node>
     """
+
+    def __init__(self):
+        self._cpu_temp_path = None
+        self._gpu_temp_path = None
+        self._find_temp_paths()
+
+    def _find_temp_paths(self):
+        # Yalnızca bir kez CPU sensörü taranır
+        best_score = -1000
+        RANK_DRV = {"zenpower": 100, "coretemp": 90, "k10temp": 90, "cpu_thermal": 80, "hp_wmi": 60, "acpitz": 30}
+        RANK_LBL = {"tdie": 100, "package id 0": 95, "tctl": 90, "core": 80, "composite": 50}
+        try:
+            for d in os.listdir("/sys/class/hwmon"):
+                path = os.path.join("/sys/class/hwmon", d)
+                try:
+                    with open(os.path.join(path, "name")) as f:
+                        drv = f.read().strip().lower()
+                except Exception: continue
+                d_score = RANK_DRV.get(drv, 10)
+                for tf in glob.glob(os.path.join(path, "temp*_input")):
+                    label = ""
+                    lp = tf.replace("_input", "_label")
+                    if os.path.exists(lp):
+                        try:
+                            with open(lp) as f:
+                                label = f.read().strip().lower()
+                        except Exception: pass
+                    l_score = max((v for k, v in RANK_LBL.items() if k in label), default=0)
+                    score = d_score + l_score
+                    if score > best_score:
+                        best_score = score
+                        self._cpu_temp_path = tf
+        except Exception:
+            pass
+
+        # Yalnızca bir kez iGPU/AMD sensörü taranır
+        try:
+            for d in os.listdir("/sys/class/hwmon"):
+                path = os.path.join("/sys/class/hwmon", d)
+                try:
+                    with open(os.path.join(path, "name")) as f:
+                        name = f.read().strip().lower()
+                    if name in ("amdgpu", "i915", "nouveau"):
+                        self._gpu_temp_path = os.path.join(path, "temp1_input")
+                except Exception: continue
+        except Exception:
+            pass
 
     def SetColor(self, z, h):
         c = str(h).lstrip("#").upper()
@@ -635,7 +684,6 @@ class HPManagerService(object):
             return json.dumps(state)
 
     def SetFanMode(self, mode):
-        """Set fan mode: 'auto', 'max', or 'custom'."""
         logger.info(f"SetFanMode: {mode}")
         ok = fan_ctrl.set_mode(mode)
         if ok:
@@ -645,7 +693,6 @@ class HPManagerService(object):
         return "OK" if ok else "FAIL"
 
     def SetFanTarget(self, fan, rpm):
-        """Set target RPM for a specific fan (in custom mode)."""
         logger.info(f"SetFanTarget: fan={fan}, rpm={rpm}")
         return "OK" if fan_ctrl.set_fan_target(fan, rpm) else "FAIL"
 
@@ -698,7 +745,6 @@ class HPManagerService(object):
         now = time.time()
         si  = state.get("_system_info_cache")
         
-        # Süre (2 saniye) dolmadıysa hiçbir donanım sorgusu yapma, doğrudan cache'i dön.
         if si and (now - state.get("_system_info_last", 0) < 2.0):
             return json.dumps(si)
 
@@ -725,71 +771,41 @@ class HPManagerService(object):
         return json.dumps(info)
 
     def _get_cached_cpu_temp(self):
-        best_t, best_score = 0.0, -1000
-        RANK_DRV = {"zenpower": 100, "coretemp": 90, "k10temp": 90,
-                    "cpu_thermal": 80, "hp_wmi": 60, "acpitz": 30}
-        RANK_LBL = {"tdie": 100, "package id 0": 95, "tctl": 90, "core": 80, "composite": 50}
-        try:
-            for d in os.listdir("/sys/class/hwmon"):
-                path = os.path.join("/sys/class/hwmon", d)
-                try:
-                    with open(os.path.join(path, "name")) as f:
-                        drv = f.read().strip().lower()
-                except Exception:
-                    continue
-                d_score = RANK_DRV.get(drv, 10)
-                for tf in glob.glob(os.path.join(path, "temp*_input")):
-                    try:
-                        with open(tf) as f:
-                            t = int(f.read().strip()) / 1000.0
-                        if not (0 < t <= 125):
-                            continue
-                        label = ""
-                        lp = tf.replace("_input", "_label")
-                        if os.path.exists(lp):
-                            with open(lp) as f:
-                                label = f.read().strip().lower()
-                        l_score = max((v for k, v in RANK_LBL.items() if k in label), default=0)
-                        score   = d_score + l_score - (500 if t in (75.0, 0.0) else 0)
-                        if score > best_score:
-                            best_score, best_t = score, t
-                    except Exception:
-                        pass
-        except Exception:
-            pass
-        return best_t
+        if self._cpu_temp_path and os.path.exists(self._cpu_temp_path):
+            try:
+                with open(self._cpu_temp_path) as f:
+                    return int(f.read().strip()) / 1000.0
+            except Exception: pass
+        return 0.0
 
     def _get_cached_gpu_temp(self):
-        # 1. Önce Sysfs üzerinden oku (Sıfıra yakın CPU tüketimi)
-        try:
-            for d in os.listdir("/sys/class/hwmon"):
-                path = os.path.join("/sys/class/hwmon", d)
-                try:
-                    with open(os.path.join(path, "name")) as f:
-                        name = f.read().strip().lower()
-                    if name in ("amdgpu", "i915", "nouveau"):
-                        with open(os.path.join(path, "temp1_input")) as f:
-                            return int(f.read().strip()) / 1000.0
-                except Exception:
-                    continue
-        except Exception:
-            pass
+        if self._gpu_temp_path and os.path.exists(self._gpu_temp_path):
+            try:
+                with open(self._gpu_temp_path) as f:
+                    return int(f.read().strip()) / 1000.0
+            except Exception: pass
 
-        # 2. Eğer hwmon üzerinden gpu bulunamazsa nvidia-smi kullan (Ağır işlem)
+        now = time.time()
+        nv_cache = state.get("_nvidia_smi_cache", {"time": 0, "val": "NOT_REACHABLE"})
+        if now - nv_cache["time"] < 15.0:
+            return nv_cache["val"]
+
         if shutil.which("nvidia-smi"):
             try:
                 out = subprocess.check_output(
                     ["nvidia-smi", "--query-gpu=temperature.gpu", "--format=csv,noheader,nounits"],
                     stderr=subprocess.DEVNULL, timeout=2
                 ).decode().strip()
-                return float(out)
+                val = float(out)
+                state["_nvidia_smi_cache"] = {"time": now, "val": val}
+                return val
             except Exception:
                 pass
                 
+        state["_nvidia_smi_cache"] = {"time": now, "val": "NOT_REACHABLE"}
         return "NOT_REACHABLE"
 
     def CleanMemory(self):
-        """Clear pagecache, dentries, and inodes as root."""
         try:
             subprocess.run(["sync"], check=True, timeout=5)
             with open("/proc/sys/vm/drop_caches", "w") as f:
@@ -799,7 +815,6 @@ class HPManagerService(object):
             return f"Error: {e}"
 
     def InstallPackage(self, pkg):
-        """Install only whitelisted gaming packages via Flatpak."""
         flatpak_id = ALLOWED_PACKAGES.get(str(pkg).strip().lower())
         if not flatpak_id:
             return "Error: package_not_allowed"
@@ -823,7 +838,6 @@ class HPManagerService(object):
         return "OK"
 
     def SetKeyboardFixes(self, prtsc, f1):
-        """Apply/update persistent hwdb rules for keyboard scancodes."""
         logger.info(f"SetKeyboardFixes: prtsc={prtsc}, f1={f1}")
         with lock:
             state["prtsc_fix"] = bool(prtsc)
@@ -856,7 +870,6 @@ class HPManagerService(object):
 
         new_content = "\n".join(content) + "\n"
 
-        # OPTİMİZASYON: Dosya içeriği aynıysa ağır hwdb derlemesini tamamen atla!
         if os.path.exists(hwdb_path):
             try:
                 with open(hwdb_path, "r") as f:
@@ -893,7 +906,6 @@ def main():
 
     load_state()
 
-    # Restore fan mode
     if fan_ctrl.is_available():
         saved_fan = state.get("fan_mode", "auto")
         if saved_fan == "custom":
@@ -908,7 +920,6 @@ def main():
             else:
                 logger.info(f"Fan mode already '{saved_fan}', skipping write to prevent spin-up.")
 
-    # Restore power profile
     if power_ctrl.available:
         saved_pp = state.get("power_profile", "balanced")
         if saved_pp in power_ctrl.get_profiles():
@@ -920,11 +931,9 @@ def main():
 
     service = HPManagerService()
 
-    # Restore keyboard fixes
     if state.get("prtsc_fix") or state.get("f1_fix"):
         service.SetKeyboardFixes(state.get("prtsc_fix"), state.get("f1_fix"))
 
-    # Restore RGB / win-lock
     if rgb_ctrl.is_available():
         rgb_ctrl.write_win_lock(state.get("win_lock", False))
         engine.start()

@@ -143,22 +143,39 @@ install_deps() {
 
     case $PM in
         pacman)
-            $INSTALL_CMD python python-gobject gtk4 libadwaita python-pydbus python-cairo power-profiles-daemon evtest
+            if pacman -Qq tlp &>/dev/null || pacman -Qq tlp-pd-git &>/dev/null; then
+                info "TLP detected, skipping power-profiles-daemon installation."
+                $INSTALL_CMD python python-gobject gtk4 libadwaita python-pydbus python-cairo evtest
+            else
+                $INSTALL_CMD python python-gobject gtk4 libadwaita python-pydbus python-cairo power-profiles-daemon evtest
+            fi
             ;;
         apt)
-            $INSTALL_CMD python3 python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 python3-pydbus python3-cairo power-profiles-daemon evtest
+            if dpkg -l tlp &>/dev/null 2>&1 | grep -q '^ii'; then
+                info "TLP detected, skipping power-profiles-daemon installation."
+                $INSTALL_CMD python3 python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 python3-pydbus python3-cairo evtest
+            else
+                $INSTALL_CMD python3 python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 python3-pydbus python3-cairo power-profiles-daemon evtest
+            fi
             ;;
         dnf)
-            # Prioritize 'tuned' (especially on Fedora 41+). If tuned is present, we skip power-profiles-daemon.
             if rpm -q tuned &>/dev/null || rpm -q tuned-ppd &>/dev/null; then
                 info "Tuned detected, skipping power-profiles-daemon installation."
+                $INSTALL_CMD python3 python3-gobject gtk4 libadwaita python3-pydbus python3-cairo evtest
+            elif rpm -q tlp &>/dev/null; then
+                info "TLP detected, skipping power-profiles-daemon installation."
                 $INSTALL_CMD python3 python3-gobject gtk4 libadwaita python3-pydbus python3-cairo evtest
             else
                 $INSTALL_CMD python3 python3-gobject gtk4 libadwaita python3-pydbus python3-cairo power-profiles-daemon evtest
             fi
             ;;
         zypper)
-            $INSTALL_CMD python3 python3-gobject gtk4 libadwaita python3-pydbus python3-cairo power-profiles-daemon evtest
+            if rpm -q tlp &>/dev/null; then
+                info "TLP detected, skipping power-profiles-daemon installation."
+                $INSTALL_CMD python3 python3-gobject gtk4 libadwaita python3-pydbus python3-cairo evtest
+            else
+                $INSTALL_CMD python3 python3-gobject gtk4 libadwaita python3-pydbus python3-cairo power-profiles-daemon evtest
+            fi
             ;;
     esac
 

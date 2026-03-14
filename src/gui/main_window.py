@@ -770,6 +770,16 @@ class HPManagerWindow(Gtk.ApplicationWindow):
             box-shadow: 0px 6px 14px rgba(0,0,0,0.15);
         }}
 
+        .debug-console {{
+            background-color: #0c0c0c;
+            color: #00ff41;
+            font-family: 'Monospace', 'Courier New', monospace;
+            font-size: 13px;
+        }}
+        .debug-console text {{
+            background-color: #0c0c0c;
+        }}
+
         {presets_css}
         """
 

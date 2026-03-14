@@ -13,6 +13,9 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 def T(k):
     from i18n import T as _T
+    try:
+        from gi.repository import Adw
+    except ImportError: pass
     return _T(k)
 
 
@@ -191,18 +194,36 @@ class SettingsPage(Gtk.Box):
         # ── Debug Log ──
         debug_card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=15)
         debug_card.add_css_class("card")
+        debug_card.append(Gtk.Label(label=T("debug_info_title") or "Diagnostic & Debug", xalign=0, css_classes=["section-title"]))
+
+        debug_grid = Gtk.Box(spacing=15, homogeneous=True)
         
-        debug_hdr = Gtk.Box(spacing=15)
-        debug_info_lbl = Gtk.Label(label=T("debug_info_desc") or "If you encounter errors, please copy the debug logs and share them with the developer.", wrap=True, hexpand=True, xalign=0)
-        debug_hdr.append(debug_info_lbl)
+        # Terminal Box
+        term_btn = Gtk.Button()
+        term_btn.add_css_class("profile-btn")
+        term_inner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8, valign=Gtk.Align.CENTER)
+        term_icon = Gtk.Image.new_from_icon_name("utilities-terminal-symbolic")
+        term_icon.set_pixel_size(32)
+        term_inner.append(term_icon)
+        term_inner.append(Gtk.Label(label=T("show_debug_info") or "Show Logs", css_classes=["stat-lbl"]))
+        term_btn.set_child(term_inner)
+        term_btn.connect("clicked", self._show_debug_terminal)
+        debug_grid.append(term_btn)
+
+        # Copy Box
+        copy_btn = Gtk.Button()
+        copy_btn.add_css_class("profile-btn")
+        copy_inner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8, valign=Gtk.Align.CENTER)
+        copy_icon = Gtk.Image.new_from_icon_name("edit-copy-symbolic")
+        copy_icon.set_pixel_size(32)
+        copy_inner.append(copy_icon)
+        self.copy_btn_label = Gtk.Label(label=T("copy_debug_log") or "Copy Info", css_classes=["stat-lbl"])
+        copy_inner.append(self.copy_btn_label)
+        copy_btn.set_child(copy_inner)
+        copy_btn.connect("clicked", self._copy_debug_log)
+        debug_grid.append(copy_btn)
         
-        copy_debug_btn = Gtk.Button(label=T("copy_debug_log") or "Copy Debug Info")
-        copy_debug_btn.add_css_class("profile-btn")
-        copy_debug_btn.connect("clicked", self._copy_debug_log)
-        
-        debug_card.append(Gtk.Label(label="Debug Information", xalign=0, css_classes=["section-title"]))
-        debug_card.append(debug_hdr)
-        debug_card.append(copy_debug_btn)
+        debug_card.append(debug_grid)
         content.append(debug_card)
 
         scroll.set_child(content)
@@ -485,10 +506,51 @@ class SettingsPage(Gtk.Box):
         return "Linux"
 
     def _copy_debug_log(self, btn):
-        err_text = self._gather_debug_info()
-        self.get_clipboard().set(err_text)
-        btn.set_label(T("copied_to_clipboard") or "Copied to Clipboard!")
-        GLib.timeout_add(2000, lambda: btn.set_label(T("copy_debug_log") or "Copy Debug Info") or False)
+        def worker():
+            err_text = self._gather_debug_info()
+            GLib.idle_add(self._copy_done, err_text)
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _copy_done(self, text):
+        self.get_clipboard().set(text)
+        old_text = self.copy_btn_label.get_label()
+        self.copy_btn_label.set_label(T("copied_to_clipboard") or "Copied!")
+        GLib.timeout_add(2000, lambda: self.copy_btn_label.set_label(old_text) or False)
+
+    def _show_debug_terminal(self, _):
+        from gi.repository import Adw
+        # Diagnostic Console Window
+        win = Gtk.Window(title="System Diagnostic Console", default_width=800, default_height=550, modal=True)
+        # Try to make it transient if roots are available
+        try:
+            root = self.get_root()
+            if root: win.set_transient_for(root)
+        except: pass
+
+        main_vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        win.set_child(main_vbox)
+
+        # Simple Header
+        header = Adw.HeaderBar()
+        main_vbox.append(header)
+
+        # Scrolled Terminal
+        scrolled = Gtk.ScrolledWindow(vexpand=True)
+        text_view = Gtk.TextView(editable=False, margin_top=12, margin_bottom=12, margin_start=12, margin_end=12)
+        text_view.set_monospace(True)
+        text_view.add_css_class("debug-console")
+        scrolled.set_child(text_view)
+        main_vbox.append(scrolled)
+
+        buffer = text_view.get_buffer()
+        buffer.set_text("Gathering system information...\nConnecting to WMI...\nReading DMI tables...\nAnalyzing kernel logs...\n\nPlease wait...")
+        
+        def run_diag():
+            logs = self._gather_debug_info()
+            GLib.idle_add(lambda: buffer.set_text(logs))
+        
+        threading.Thread(target=run_diag, daemon=True).start()
+        win.present()
         
     def _gather_debug_info(self):
         import platform, subprocess, os, glob

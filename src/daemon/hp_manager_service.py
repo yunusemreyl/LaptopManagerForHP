@@ -800,9 +800,13 @@ class HPManagerService(object):
                     
                     total_weight = drv_score + label_score
                     
-                    # Anti-Stuck Logic: Common ACPI bugs (e.g., 75.0 on HP/Victus)
-                    if drv == "acpitz" and (t == 75.0 or t == 0.0):
-                        total_weight -= 200 # Immediate disqualification if anything else exists
+                    # Anti-Stuck & Invalid Reading Logic
+                    # Many drivers (especially acpitz/zenpower on unsupported CPUs) report stuck 75.0 or 0.0
+                    if t == 75.0 or t == 0.0:
+                        total_weight -= 500 # Heavy penalty for suspicious/static readings
+                    elif t == prev_temp if (prev_temp := info.get("cpu_temp", 0)) > 0 else 0:
+                        # Slight penalty for values that never change? (Maybe too aggressive)
+                        pass
                         
                     cpu_candidates.append({
                         "temp": t,

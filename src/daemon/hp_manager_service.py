@@ -851,10 +851,21 @@ class HPManagerService(object):
         if f1:
             content.append(" KEYBOARD_KEY_ab=f1")        # Presentation key -> F1
 
+        new_content = "\n".join(content) + "\n"
+
+        # OPTİMİZASYON: Dosya içeriği aynıysa ağır hwdb derlemesini tamamen atla!
+        if os.path.exists(hwdb_path):
+            try:
+                with open(hwdb_path, "r") as f:
+                    if f.read() == new_content:
+                        return
+            except Exception:
+                pass
+
         try:
             os.makedirs(os.path.dirname(hwdb_path), exist_ok=True)
             with open(hwdb_path, "w") as f:
-                f.write("\n".join(content) + "\n")
+                f.write(new_content)
 
             def _apply():
                 try:

@@ -16,7 +16,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 logger = logging.getLogger("hp-manager")
 
 lock = threading.RLock()
-state_changed = threading.Event()  # Animasyon motorunu uyutmak/uyandırmak için eklendi
+state_changed = threading.Event()
 HEX_COLOR_RE = re.compile(r"^[0-9A-F]{6}$")
 VALID_LIGHT_MODES = {"static", "breathing", "cycle", "wave"}
 VALID_DIRECTIONS = {"ltr", "rtl"}
@@ -27,13 +27,6 @@ VALID_GPU_MODES = {"hybrid", "discrete", "integrated"}
 # FAN CONTROLLER
 # ============================================================
 class FanController:
-    """
-    hp-wmi driver hwmon interface:
-      - fan{1,2}_input  : current RPM (read-only)
-      - fan{1,2}_max    : max RPM (read-only)
-      - fan{1,2}_target : target RPM (read-write, for manual mode)
-      - pwm1_enable     : global fan mode (0=max, 1=manual, 2=auto)
-    """
     def __init__(self):
         self.hwmon_path = self._find_hwmon()
         self.fan_count = 0
@@ -46,7 +39,6 @@ class FanController:
             self._read_current_mode()
 
     def _find_hwmon(self):
-        """Find the 'hp' hwmon device."""
         for path in glob.glob("/sys/class/hwmon/hwmon*/name"):
             try:
                 with open(path, 'r') as f:
@@ -84,7 +76,6 @@ class FanController:
         self.fan_count = len(self.found_fans)
 
     def _read_max_speeds(self):
-        """Read actual max RPMs from driver."""
         if not self.hwmon_path:
             return
         for i in self.found_fans:
@@ -96,7 +87,6 @@ class FanController:
                 self.max_speeds[i] = 6000
 
     def _read_current_mode(self):
-        """Read pwm1_enable to determine current mode."""
         if not self.hwmon_path:
             return
         pwm_path = os.path.join(self.hwmon_path, "pwm1_enable")
@@ -140,7 +130,6 @@ class FanController:
         return self._sysfs_read(f"fan{fan_num}_target")
 
     def set_mode(self, mode):
-        """Set fan mode: 'auto' (pwm1_enable=2), 'max' (pwm1_enable=0), 'custom' (pwm1_enable=1)."""
         if not self.hwmon_path:
             return False
         val = {"auto": 2, "max": 0, "custom": 1}.get(mode)
@@ -153,7 +142,6 @@ class FanController:
         return ok
 
     def set_fan_target(self, fan_num, rpm):
-        """Set target RPM for a specific fan (only effective in custom mode)."""
         if not self.hwmon_path or fan_num not in self.found_fans:
             return False
         rpm = max(0, min(rpm, self.get_max_speed(fan_num)))
@@ -181,7 +169,6 @@ class RGBController:
         self.last_written = [None] * 8
 
     def _find_rgb_path(self):
-        """Find the RGB control sysfs path."""
         if os.path.exists(DRIVER_PATH_CUSTOM):
             logger.info(f"RGB: Using custom driver path {DRIVER_PATH_CUSTOM}")
             return DRIVER_PATH_CUSTOM
@@ -342,7 +329,6 @@ class MUXController:
 
     def get_mode(self):
         now = time.time()
-        # MUX modu sürekli alt süreç çalıştırmaması için 10 saniye cachelendi
         if now - self._last_check < 10.0:
             return self._cached_mode
 
@@ -597,12 +583,30 @@ class HPManagerService(object):
     """
 
     def __init__(self):
+        # 1. Statik sistem bilgileri RAM'e kaydediliyor
+        self._static_info = {
+            "hostname": platform.node(),
+            "kernel": platform.release(),
+            "os_name": "Linux",
+            "product_name": "HP Laptop"
+        }
+        for dmi_file in ("/sys/devices/virtual/dmi/id/product_name", "/sys/devices/virtual/dmi/id/product_family"):
+            if os.path.exists(dmi_file):
+                try:
+                    with open(dmi_file) as f:
+                        self._static_info["product_name"] = f.read().strip()
+                    break
+                except Exception: pass
+
+        # 2. nvidia-smi sistemde var mı kontrolü 1 kez yapılıyor
+        self._has_nvidia_smi = shutil.which("nvidia-smi") is not None
+        
+        # 3. Sensör yolları 1 kez taranıyor
         self._cpu_temp_path = None
         self._gpu_temp_path = None
         self._find_temp_paths()
 
     def _find_temp_paths(self):
-        # Yalnızca bir kez CPU sensörü taranır
         best_score = -1000
         RANK_DRV = {"zenpower": 100, "coretemp": 90, "k10temp": 90, "cpu_thermal": 80, "hp_wmi": 60, "acpitz": 30}
         RANK_LBL = {"tdie": 100, "package id 0": 95, "tctl": 90, "core": 80, "composite": 50}
@@ -623,14 +627,12 @@ class HPManagerService(object):
                                 label = f.read().strip().lower()
                         except Exception: pass
                     l_score = max((v for k, v in RANK_LBL.items() if k in label), default=0)
-                    score = d_score + l_score
+                    score = d_score + l_score - (500 if "75" in str(tf) else 0)
                     if score > best_score:
                         best_score = score
                         self._cpu_temp_path = tf
-        except Exception:
-            pass
+        except Exception: pass
 
-        # Yalnızca bir kez iGPU/AMD sensörü taranır
         try:
             for d in os.listdir("/sys/class/hwmon"):
                 path = os.path.join("/sys/class/hwmon", d)
@@ -640,8 +642,7 @@ class HPManagerService(object):
                     if name in ("amdgpu", "i915", "nouveau"):
                         self._gpu_temp_path = os.path.join(path, "temp1_input")
                 except Exception: continue
-        except Exception:
-            pass
+        except Exception: pass
 
     def SetColor(self, z, h):
         c = str(h).lstrip("#").upper()
@@ -748,23 +749,9 @@ class HPManagerService(object):
         if si and (now - state.get("_system_info_last", 0) < 2.0):
             return json.dumps(si)
 
-        info = {
-            "hostname":     platform.node(),
-            "kernel":       platform.release(),
-            "os_name":      "Linux",
-            "cpu_temp":     self._get_cached_cpu_temp(),
-            "gpu_temp":     self._get_cached_gpu_temp(),
-            "product_name": "HP Laptop",
-        }
-        for dmi_file in ("/sys/devices/virtual/dmi/id/product_name",
-                         "/sys/devices/virtual/dmi/id/product_family"):
-            if os.path.exists(dmi_file):
-                try:
-                    with open(dmi_file) as f:
-                        info["product_name"] = f.read().strip()
-                    break
-                except Exception:
-                    pass
+        info = self._static_info.copy()
+        info["cpu_temp"] = self._get_cached_cpu_temp()
+        info["gpu_temp"] = self._get_cached_gpu_temp()
 
         state["_system_info_cache"] = info
         state["_system_info_last"]  = now
@@ -790,7 +777,7 @@ class HPManagerService(object):
         if now - nv_cache["time"] < 15.0:
             return nv_cache["val"]
 
-        if shutil.which("nvidia-smi"):
+        if self._has_nvidia_smi:
             try:
                 out = subprocess.check_output(
                     ["nvidia-smi", "--query-gpu=temperature.gpu", "--format=csv,noheader,nounits"],
@@ -864,9 +851,9 @@ class HPManagerService(object):
             "evdev:atkbd:dmi:bvn*:bvr*:bd*:svnHP*:pn*:*",
         ]
         if prtsc:
-            content.append(" KEYBOARD_KEY_b7=sysrq")   # PrtSc -> SysRq
+            content.append(" KEYBOARD_KEY_b7=sysrq")   
         if f1:
-            content.append(" KEYBOARD_KEY_ab=f1")        # Presentation key -> F1
+            content.append(" KEYBOARD_KEY_ab=f1")        
 
         new_content = "\n".join(content) + "\n"
 

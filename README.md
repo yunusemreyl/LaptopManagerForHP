@@ -141,6 +141,10 @@ cd OmenCommandCenterforLinux
 sudo ./setup.sh uninstall
 ```
 
+## 🐛 Troubleshooting
+
+If the `omen` CLI fails with a `pydbus` import error, your `PATH` may be pointing to a non-system Python (e.g., Conda) that does not share packages with the system Python where `python3-pydbus` was installed. See [`TROUBLESHOOTING.md`](TROUBLESHOOTING.md) for the fix.
+
 ## 🐧 Compatibility
 
 | Distribution | Status | Notes |

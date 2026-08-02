@@ -157,20 +157,22 @@ class AppProfilesPage(Gtk.Box):
         
         # View switcher (Grid vs List)
         self.view_mode = "grid"  # default to professional grid card view
-        switcher_box = Gtk.Box(spacing=4)
-        switcher_box.add_css_class("inner-panel")
+        switcher_box = Gtk.Box(spacing=2)
+        switcher_box.add_css_class("fan-mode-compact-strip")
         switcher_box.set_valign(Gtk.Align.CENTER)
         
-        self.btn_grid_view = Gtk.Button(label="░")
+        self.btn_grid_view = Gtk.ToggleButton(label="⊞ Grid")
+        self.btn_grid_view.set_active(True)
         self.btn_grid_view.set_tooltip_text("Grid View")
-        self.btn_grid_view.add_css_class("update-btn")
-        self.btn_grid_view.connect("clicked", lambda *_: self._set_view_mode("grid"))
+        self.btn_grid_view.add_css_class("fan-mode-compact-btn")
+        self.btn_grid_view.connect("toggled", lambda btn: self._on_view_toggle(btn, "grid"))
         switcher_box.append(self.btn_grid_view)
         
-        self.btn_list_view = Gtk.Button(label="≡")
+        self.btn_list_view = Gtk.ToggleButton(label="≡ List")
+        self.btn_list_view.set_active(False)
         self.btn_list_view.set_tooltip_text("List View")
-        self.btn_list_view.add_css_class("update-btn")
-        self.btn_list_view.connect("clicked", lambda *_: self._set_view_mode("list"))
+        self.btn_list_view.add_css_class("fan-mode-compact-btn")
+        self.btn_list_view.connect("toggled", lambda btn: self._on_view_toggle(btn, "list"))
         switcher_box.append(self.btn_list_view)
         
         list_header_box.append(switcher_box)
@@ -187,10 +189,24 @@ class AppProfilesPage(Gtk.Box):
         self._refresh_app_profiles()
         self.set_ui_scale("normal")
 
-    def _set_view_mode(self, mode):
-        if self.view_mode != mode:
-            self.view_mode = mode
-            self._refresh_app_profiles()
+    def _on_view_toggle(self, btn, mode):
+        if getattr(self, "_block_view_toggle", False):
+            return
+        if btn.get_active():
+            self._block_view_toggle = True
+            if mode == "grid":
+                self.btn_list_view.set_active(False)
+            else:
+                self.btn_grid_view.set_active(False)
+            self._block_view_toggle = False
+            
+            if self.view_mode != mode:
+                self.view_mode = mode
+                self._refresh_app_profiles()
+        else:
+            # Prevent deselecting both buttons
+            if not self.btn_grid_view.get_active() and not self.btn_list_view.get_active():
+                btn.set_active(True)
 
     def _init_autocomplete(self):
         self._selected_exec_name = None

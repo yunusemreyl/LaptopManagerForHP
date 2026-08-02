@@ -643,7 +643,8 @@ class HPManagerWindow(Gtk.ApplicationWindow):
             fg             = "#0f172a"
             fg_dim         = "#475569"
             fg_very_dim    = "#64748b"
-            input_bg       = "rgba(0, 0, 0, 0.05)"
+            input_bg       = "#ffffff"
+            card_border    = "rgba(0, 0, 0, 0.12)"
             clean_ram_color = "#0f172a"
             launcher_title_color = "#0f172a"
             launcher_subtitle_color = "#475569"
@@ -1039,7 +1040,14 @@ class HPManagerWindow(Gtk.ApplicationWindow):
         }}
         entry {{
             color: {fg};
-            transition: color 220ms ease;
+            background-color: {input_bg};
+            border: 1px solid {card_border};
+            border-radius: 6px;
+            padding: 6px 10px;
+            transition: color 220ms ease, background-color 220ms ease;
+        }}
+        entry placeholder {{
+            color: {fg_dim};
         }}
         image {{
             color: {fg_dim};

@@ -134,7 +134,7 @@ class AppProfilesPage(Gtk.Box):
         self.add_btn = Gtk.Button(label=T("add"))
         self.add_btn.add_css_class("suggested-action")
         self.add_btn.set_valign(Gtk.Align.CENTER)
-        self.add_btn.connect("clicked", self._add_app_profile)
+        self.add_btn.connect("clicked", lambda btn: self._debounced_click(btn, lambda: self._add_app_profile(btn), cooldown_ms=600))
         form_box.append(self.add_btn)
 
         self.cancel_edit_btn = Gtk.Button(label="✕")
@@ -449,19 +449,19 @@ class AppProfilesPage(Gtk.Box):
                     launch_btn = Gtk.Button(label="▶")
                     launch_btn.add_css_class("update-btn")
                     launch_btn.set_tooltip_text(T("launch"))
-                    launch_btn.connect("clicked", lambda *_, a=app_name, v=val: self._launch_app_program(a, v))
+                    launch_btn.connect("clicked", lambda btn, a=app_name, v=val: self._debounced_click(btn, lambda: self._launch_app_program(a, v), cooldown_ms=1200))
                     actions_box.append(launch_btn)
 
                     edit_btn = Gtk.Button(label="✏️")
                     edit_btn.add_css_class("update-btn")
                     edit_btn.set_tooltip_text(T("edit"))
-                    edit_btn.connect("clicked", lambda *_, a=app_name, v=val: self._start_edit_app_profile(a, v))
+                    edit_btn.connect("clicked", lambda btn, a=app_name, v=val: self._debounced_click(btn, lambda: self._start_edit_app_profile(a, v), cooldown_ms=600))
                     actions_box.append(edit_btn)
 
                     del_btn = Gtk.Button(label="🗑️")
                     del_btn.add_css_class("update-btn")
                     del_btn.set_tooltip_text(T("delete"))
-                    del_btn.connect("clicked", lambda *_, a=app_name: self._delete_app_profile(a))
+                    del_btn.connect("clicked", lambda btn, a=app_name: self._debounced_click(btn, lambda: self._delete_app_profile(a), cooldown_ms=600))
                     actions_box.append(del_btn)
 
                     card.append(actions_box)
@@ -531,19 +531,19 @@ class AppProfilesPage(Gtk.Box):
                     launch_btn.add_css_class("update-btn")
                     launch_btn.set_valign(Gtk.Align.CENTER)
                     launch_btn.set_tooltip_text(T("launch"))
-                    launch_btn.connect("clicked", lambda *_, a=app_name, v=val: self._launch_app_program(a, v))
+                    launch_btn.connect("clicked", lambda btn, a=app_name, v=val: self._debounced_click(btn, lambda: self._launch_app_program(a, v), cooldown_ms=1200))
 
                     edit_btn = Gtk.Button(label="✏️")
                     edit_btn.add_css_class("update-btn")
                     edit_btn.set_valign(Gtk.Align.CENTER)
                     edit_btn.set_tooltip_text(T("edit"))
-                    edit_btn.connect("clicked", lambda *_, a=app_name, v=val: self._start_edit_app_profile(a, v))
+                    edit_btn.connect("clicked", lambda btn, a=app_name, v=val: self._debounced_click(btn, lambda: self._start_edit_app_profile(a, v), cooldown_ms=600))
 
                     del_btn = Gtk.Button(label="🗑️")
                     del_btn.add_css_class("update-btn")
                     del_btn.set_valign(Gtk.Align.CENTER)
                     del_btn.set_tooltip_text(T("delete"))
-                    del_btn.connect("clicked", lambda *_, a=app_name: self._delete_app_profile(a))
+                    del_btn.connect("clicked", lambda btn, a=app_name: self._debounced_click(btn, lambda: self._delete_app_profile(a), cooldown_ms=600))
                     
                     row.append(lbl)
                     row.append(profile_lbl)
@@ -616,6 +616,15 @@ class AppProfilesPage(Gtk.Box):
         except Exception as e:
             print(f"Failed to toggle app profiles: {e}")
         return False
+
+    def _debounced_click(self, button, action_fn, cooldown_ms=600):
+        if not button or not button.get_sensitive():
+            return
+        button.set_sensitive(False)
+        try:
+            action_fn()
+        finally:
+            GLib.timeout_add(cooldown_ms, lambda: button.set_sensitive(True))
 
     def _add_app_profile(self, btn):
         if not self.power_service:

@@ -166,7 +166,8 @@ class AppProfilesPage(Gtk.Box):
 
     def _init_autocomplete(self):
         self._selected_exec_name = None
-        self.list_store = Gtk.ListStore(str, str)
+        self._selected_icon_name = None
+        self.list_store = Gtk.ListStore(str, str, str)  # display_name, exec_name, icon_name
         self.completion = Gtk.EntryCompletion()
         self.completion.set_model(self.list_store)
         self.completion.set_text_column(0)
@@ -192,8 +193,10 @@ class AppProfilesPage(Gtk.Box):
     def _on_completion_match_selected(self, completion, model, tree_iter):
         display_name = model.get_value(tree_iter, 0)
         exec_name = model.get_value(tree_iter, 1)
+        icon_name = model.get_value(tree_iter, 2)
         self.add_app_entry.set_text(display_name)
         self._selected_exec_name = exec_name
+        self._selected_icon_name = icon_name
         self.add_app_entry.set_position(-1)
         return True
 
@@ -208,6 +211,7 @@ class AppProfilesPage(Gtk.Box):
                     with open(filepath, "r", errors="ignore") as f:
                         name = None
                         exec_cmd = None
+                        icon_name = None
                         in_desktop_entry = False
                         for line in f:
                             line_strip = line.strip()
@@ -226,50 +230,51 @@ class AppProfilesPage(Gtk.Box):
                                 exec_raw = line.split("=", 1)[1].strip()
                                 if exec_raw:
                                     exec_cmd = parse_exec_command(exec_raw)
+                            elif line.startswith("Icon="):
+                                icon_name = line.split("=", 1)[1].strip()
                                     
                             if name and exec_cmd:
-                                key = (name, exec_cmd)
-                                if key not in seen:
-                                    seen.add(key)
+                                key = (name, exec_cmd, icon_name or exec_cmd)
+                                if (name, exec_cmd) not in seen:
+                                    seen.add((name, exec_cmd))
                                     apps.append(key)
                                 break
                 except Exception:
                     pass
         
         common_tools = [
-            ("Android Studio", "studio"),
-            ("Android Studio", "java"),
-            ("Steam", "steam"),
-            ("Visual Studio Code", "code"),
-            ("Firefox", "firefox"),
-            ("Google Chrome", "chrome"),
-            ("Google Chrome", "google-chrome"),
-            ("Discord", "discord"),
-            ("Spotify", "spotify"),
-            ("Minecraft", "minecraft"),
-            ("Lutris", "lutris"),
-            ("Heroic Games Launcher", "heroic"),
-            ("OBS Studio", "obs"),
-            ("VLC Media Player", "vlc"),
-            ("Wine", "wine"),
-            ("IntelliJ IDEA", "idea"),
-            ("PyCharm", "pycharm"),
-            ("WebStorm", "webstorm"),
-            ("Terminal", "bash"),
-            ("Qemu/KVM", "qemu-system-x86_64"),
+            ("Android Studio", "studio", "android-studio"),
+            ("Android Studio", "java", "android-studio"),
+            ("Steam", "steam", "steam"),
+            ("Visual Studio Code", "code", "vscode"),
+            ("Firefox", "firefox", "firefox"),
+            ("Google Chrome", "chrome", "google-chrome"),
+            ("Google Chrome", "google-chrome", "google-chrome"),
+            ("Discord", "discord", "discord"),
+            ("Spotify", "spotify", "spotify"),
+            ("Minecraft", "minecraft", "minecraft"),
+            ("Lutris", "lutris", "lutris"),
+            ("Heroic Games Launcher", "heroic", "heroic"),
+            ("OBS Studio", "obs", "obs"),
+            ("VLC Media Player", "vlc", "vlc"),
+            ("Wine", "wine", "wine"),
+            ("IntelliJ IDEA", "idea", "intellij-idea-community"),
+            ("PyCharm", "pycharm", "pycharm"),
+            ("WebStorm", "webstorm", "webstorm"),
+            ("Terminal", "bash", "utilities-terminal"),
+            ("Qemu/KVM", "qemu-system-x86_64", "qemu"),
         ]
-        for name, exec_cmd in common_tools:
-            key = (name, exec_cmd)
-            if key not in seen:
-                seen.add(key)
-                apps.append(key)
+        for name, exec_cmd, icon in common_tools:
+            if (name, exec_cmd) not in seen:
+                seen.add((name, exec_cmd))
+                apps.append((name, exec_cmd, icon))
 
         apps.sort(key=lambda x: x[0].lower())
 
         def update_store():
-            for name, exec_cmd in apps:
+            for name, exec_cmd, icon in apps:
                 display_name = f"{name} ({exec_cmd})"
-                self.list_store.append([display_name, exec_cmd])
+                self.list_store.append([display_name, exec_cmd, icon])
             return False
 
         GLib.idle_add(update_store)
@@ -331,16 +336,23 @@ class AppProfilesPage(Gtk.Box):
                     row.set_margin_top(4)
                     row.set_margin_bottom(4)
                     
-                    icon = "🎮"
-                    if category == "program":
-                        icon = "💻"
-                    elif category == "other":
-                        icon = "⚙️"
+                    icon_name = val.get("icon", app_name) if isinstance(val, dict) else app_name
+                    icon_widget = None
+                    theme_icon = Gtk.IconTheme.get_for_display(Gdk.Display.get_default())
+                    if theme_icon.has_icon(icon_name):
+                        icon_widget = Gtk.Image.new_from_icon_name(icon_name)
+                        icon_widget.set_pixel_size(24)
+                    else:
+                        fallback_icon = "application-x-executable-symbolic" if category == "program" else "input-gaming-symbolic"
+                        icon_widget = Gtk.Image.new_from_icon_name(fallback_icon)
+                        icon_widget.set_pixel_size(24)
+                    
+                    row.append(icon_widget)
                         
                     active_app = data.get("active_app")
                     is_active = active_app and (active_app.lower() == app_name.lower())
                     
-                    lbl_text = f"{icon}  {display_name}"
+                    lbl_text = display_name
                     if is_active:
                         lbl_text += f" <span foreground='#57c494' size='small' weight='bold'>[{T('active')}]</span>"
                         
@@ -400,16 +412,19 @@ class AppProfilesPage(Gtk.Box):
             display_name = val.get("name", app_name)
             fan_mode = val.get("fan_mode", "default")
             theme = val.get("theme", "default")
+            icon_name = val.get("icon", app_name)
         else:
             profile = val
             category = "game"
             display_name = app_name
             fan_mode = "default"
             theme = "default"
+            icon_name = app_name
 
         self.completion.set_popup_completion(False)
         self.add_app_entry.set_text(display_name)
         self._selected_exec_name = app_name
+        self._selected_icon_name = icon_name
         self.completion.set_popup_completion(True)
 
         profile_map_inv = {"power-saver": 0, "balanced": 1, "performance": 2}
@@ -431,6 +446,7 @@ class AppProfilesPage(Gtk.Box):
         self.cancel_edit_btn.set_visible(False)
         self.add_app_entry.set_text("")
         self._selected_exec_name = None
+        self._selected_icon_name = None
 
     def _on_app_profiles_toggle(self, switch, state):
         if getattr(self, "_block_sync", False):
@@ -484,12 +500,14 @@ class AppProfilesPage(Gtk.Box):
             if self._editing_app_key and self._editing_app_key in app_profiles and self._editing_app_key != exec_name:
                 del app_profiles[self._editing_app_key]
 
+            icon_name = getattr(self, "_selected_icon_name", None) or exec_name
             app_profiles[exec_name] = {
                 "profile": profile,
                 "category": category,
                 "name": display_name,
                 "fan_mode": fan_mode,
                 "theme": theme,
+                "icon": icon_name,
             }
             
             self.power_service.SetAppProfiles(json.dumps(app_profiles))

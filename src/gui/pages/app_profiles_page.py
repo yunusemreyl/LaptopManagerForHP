@@ -407,10 +407,10 @@ class AppProfilesPage(Gtk.Box):
             fan_mode = "default"
             theme = "default"
 
+        self.completion.set_popup_completion(False)
         self.add_app_entry.set_text(display_name)
-        self.add_app_entry.select_region(0, -1)
-        self.add_app_entry.grab_focus()
         self._selected_exec_name = app_name
+        self.completion.set_popup_completion(True)
 
         profile_map_inv = {"power-saver": 0, "balanced": 1, "performance": 2}
         self.add_profile_dd.set_selected(profile_map_inv.get(profile, 1))

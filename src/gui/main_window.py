@@ -56,7 +56,7 @@ from pages.keyboard_page import KeyboardPage
 from pages.app_profiles_page import AppProfilesPage
 from pages.power_page import PowerPage
 
-APP_VERSION = "1.6.6"
+APP_VERSION = "1.7.0"
 CONFIG_FILE      = os.path.expanduser("~/.config/hp-manager.toml")
 CONFIG_FILE_JSON = os.path.expanduser("~/.config/hp-manager.json")
 _LAUNCHER_REFRESH_MS = 5000

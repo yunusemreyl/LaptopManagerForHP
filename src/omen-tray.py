@@ -190,13 +190,19 @@ def macro_listener_loop():
         def on_macro(key_name):
             try:
                 config_path = os.path.expanduser("~/.config/hp-manager/macros.json")
+                cmd = None
                 if os.path.exists(config_path):
                     with open(config_path, "r") as f:
                         macros = json.load(f)
                     cmd = macros.get(key_name)
-                    if cmd:
-                        print(f"Executing macro for {key_name}: {cmd}")
-                        subprocess.Popen(cmd, shell=True)
+                
+                # Default behavior for dedicated Omen Key if no custom macro mapped
+                if not cmd and key_name in ("omen_key", "prog2"):
+                    cmd = "/usr/bin/hp-manager"
+
+                if cmd:
+                    print(f"Executing macro for {key_name}: {cmd}")
+                    subprocess.Popen(cmd, shell=True)
             except Exception as e:
                 print(f"Macro error: {e}")
                 

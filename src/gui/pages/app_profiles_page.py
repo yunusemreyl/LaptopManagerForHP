@@ -525,8 +525,58 @@ class AppProfilesPage(Gtk.Box):
 
     def _launch_app_program(self, app_name, val):
         import subprocess
+        
+        # Check if application/process is already running
+        target_token = app_name.split("_", 1)[1] if "_" in app_name else app_name
+        is_running = False
+        target_pid = None
+
         try:
-            # Handle launcher prefixes (e.g. steam_12345, flatpak_com.org.App, snap_app)
+            for pid_str in os.listdir("/proc"):
+                if not pid_str.isdigit():
+                    continue
+                try:
+                    cmdline_path = os.path.join("/proc", pid_str, "cmdline")
+                    if os.stat(cmdline_path).st_uid < 1000:
+                        continue
+                    with open(cmdline_path, "r", errors="ignore") as f:
+                        cmdline = f.read().replace("\x00", " ").strip().lower()
+                    if target_token.lower() in cmdline:
+                        is_running = True
+                        target_pid = pid_str
+                        break
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        # If already running, bring existing window to focus
+        if is_running and target_pid:
+            try:
+                # Try wmctrl first
+                if shutil.which("wmctrl"):
+                    res = subprocess.run(["wmctrl", "-ia", str(target_pid)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    if res.returncode == 0:
+                        return
+                    # Try matching by window title / app name
+                    disp_name = val.get("name", target_token) if isinstance(val, dict) else target_token
+                    res = subprocess.run(["wmctrl", "-a", disp_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    if res.returncode == 0:
+                        return
+                
+                # Fallback to xdotool
+                if shutil.which("xdotool"):
+                    res = subprocess.run(["xdotool", "search", "--pid", str(target_pid), "windowactivate"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    if res.returncode == 0:
+                        return
+            except Exception:
+                pass
+            # App is already running, prevent launching duplicate windows
+            print(f"Program '{target_token}' is already running (PID: {target_pid}). Focused existing instance.")
+            return
+
+        # Not running -> launch fresh instance
+        try:
             if app_name.startswith("steam_"):
                 game_id = app_name.split("_", 1)[1]
                 subprocess.Popen(["steam", f"steam://rungameid/{game_id}"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -543,7 +593,6 @@ class AppProfilesPage(Gtk.Box):
                 heroic_id = app_name.split("_", 1)[1]
                 subprocess.Popen(["heroic", f"heroic://launch/{heroic_id}"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             else:
-                # Direct executable name
                 subprocess.Popen([app_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         except Exception as e:
             print(f"Failed to launch program {app_name}: {e}")

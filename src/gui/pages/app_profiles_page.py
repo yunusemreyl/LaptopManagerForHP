@@ -151,7 +151,30 @@ class AppProfilesPage(Gtk.Box):
         # ── Configuration Mappings List Card ──
         self.list_card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=15)
         self.list_card.add_css_class("card")
-        self.list_card.append(Gtk.Label(label=T("app_profiles"), xalign=0, css_classes=["heading"]))
+        
+        list_header_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10, valign=Gtk.Align.CENTER)
+        list_header_box.append(Gtk.Label(label=T("app_profiles"), xalign=0, hexpand=True, css_classes=["heading"]))
+        
+        # View switcher (Grid vs List)
+        self.view_mode = "grid"  # default to professional grid card view
+        switcher_box = Gtk.Box(spacing=4)
+        switcher_box.add_css_class("inner-panel")
+        switcher_box.set_valign(Gtk.Align.CENTER)
+        
+        self.btn_grid_view = Gtk.Button(label="░")
+        self.btn_grid_view.set_tooltip_text("Grid View")
+        self.btn_grid_view.add_css_class("update-btn")
+        self.btn_grid_view.connect("clicked", lambda *_: self._set_view_mode("grid"))
+        switcher_box.append(self.btn_grid_view)
+        
+        self.btn_list_view = Gtk.Button(label="≡")
+        self.btn_list_view.set_tooltip_text("List View")
+        self.btn_list_view.add_css_class("update-btn")
+        self.btn_list_view.connect("clicked", lambda *_: self._set_view_mode("list"))
+        switcher_box.append(self.btn_list_view)
+        
+        list_header_box.append(switcher_box)
+        self.list_card.append(list_header_box)
         
         self.app_profiles_list_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         self.list_card.append(self.app_profiles_list_box)
@@ -163,6 +186,11 @@ class AppProfilesPage(Gtk.Box):
 
         self._refresh_app_profiles()
         self.set_ui_scale("normal")
+
+    def _set_view_mode(self, mode):
+        if self.view_mode != mode:
+            self.view_mode = mode
+            self._refresh_app_profiles()
 
     def _init_autocomplete(self):
         self._selected_exec_name = None
@@ -308,17 +336,119 @@ class AppProfilesPage(Gtk.Box):
                     break
                 self.app_profiles_list_box.remove(child)
                 
-            # Populate list box
+            # Populate container
             app_profiles = data.get("app_profiles", {})
             if not app_profiles:
-                # Show dummy placeholder row when list is empty
                 empty_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12, valign=Gtk.Align.CENTER)
                 empty_row.set_margin_top(8)
                 empty_row.set_margin_bottom(8)
                 empty_lbl = Gtk.Label(label=T("no_profiles"), xalign=0, css_classes=["dim-label"])
                 empty_row.append(empty_lbl)
                 self.app_profiles_list_box.append(empty_row)
+            elif self.view_mode == "grid":
+                # Render Professional Grid Layout
+                grid_flow = Gtk.FlowBox()
+                grid_flow.set_valign(Gtk.Align.START)
+                grid_flow.set_max_children_per_line(4)
+                grid_flow.set_min_children_per_line(1)
+                grid_flow.set_selection_mode(Gtk.SelectionMode.NONE)
+                grid_flow.set_column_spacing(16)
+                grid_flow.set_row_spacing(16)
+
+                theme_icon = Gtk.IconTheme.get_for_display(Gdk.Display.get_default())
+                active_app = data.get("active_app")
+
+                for app_name, val in app_profiles.items():
+                    if isinstance(val, dict):
+                        profile = val.get("profile", "balanced")
+                        category = val.get("category", "game")
+                        display_name = val.get("name", app_name)
+                        fan_mode = val.get("fan_mode", "default")
+                        theme = val.get("theme", "default")
+                        icon_name = val.get("icon", app_name)
+                    else:
+                        profile = val
+                        category = "game"
+                        display_name = app_name
+                        fan_mode = "default"
+                        theme = "default"
+                        icon_name = app_name
+
+                    is_active = active_app and (active_app.lower() == app_name.lower())
+
+                    # Outer Card Box
+                    card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+                    card.add_css_class("inner-panel")
+                    card.set_size_request(210, 165)
+
+                    # Top Row: Icon + Title + Active Status Badge
+                    top_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10, valign=Gtk.Align.CENTER)
+                    
+                    if theme_icon.has_icon(icon_name):
+                        img = Gtk.Image.new_from_icon_name(icon_name)
+                    else:
+                        fallback_icon = "application-x-executable-symbolic" if category == "program" else "input-gaming-symbolic"
+                        img = Gtk.Image.new_from_icon_name(fallback_icon)
+                    img.set_pixel_size(32)
+                    top_box.append(img)
+
+                    title_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2, hexpand=True)
+                    title_lbl = Gtk.Label(label=display_name, xalign=0, css_classes=["title-4"], ellipsize=3)
+                    title_box.append(title_lbl)
+
+                    if is_active:
+                        act_lbl = Gtk.Label(css_classes=["caption"])
+                        act_lbl.set_markup(f"<span foreground='#57c494' weight='bold'>[{T('active')}]</span>")
+                        act_lbl.set_xalign(0)
+                        title_box.append(act_lbl)
+
+                    top_box.append(title_box)
+                    card.append(top_box)
+
+                    card.append(Gtk.Separator())
+
+                    # Meta Settings Badges
+                    p_text = T("saver") if profile == "power-saver" else T("balanced") if profile == "balanced" else T("performance")
+                    meta_parts = [f"⚡ {p_text}"]
+                    if fan_mode and fan_mode != "default":
+                        fan_lbl_text = T("fan_auto") if fan_mode == "auto" else T("fan_max")
+                        meta_parts.append(f"🌀 {fan_lbl_text}")
+                    if theme == "dark":
+                        meta_parts.append("🌙 Dark")
+                    elif theme == "light":
+                        meta_parts.append("☀️ Light")
+
+                    meta_lbl = Gtk.Label(label="\n".join(meta_parts), xalign=0, css_classes=["dim-label"], wrap=True)
+                    meta_lbl.set_vexpand(True)
+                    card.append(meta_lbl)
+
+                    # Action Buttons Row
+                    actions_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6, halign=Gtk.Align.END)
+
+                    launch_btn = Gtk.Button(label="▶")
+                    launch_btn.add_css_class("suggested-action")
+                    launch_btn.set_tooltip_text(T("launch"))
+                    launch_btn.connect("clicked", lambda *_, a=app_name, v=val: self._launch_app_program(a, v))
+                    actions_box.append(launch_btn)
+
+                    edit_btn = Gtk.Button(label="✏️")
+                    edit_btn.add_css_class("update-btn")
+                    edit_btn.set_tooltip_text(T("edit"))
+                    edit_btn.connect("clicked", lambda *_, a=app_name, v=val: self._start_edit_app_profile(a, v))
+                    actions_box.append(edit_btn)
+
+                    del_btn = Gtk.Button(label="🗑️")
+                    del_btn.add_css_class("update-btn")
+                    del_btn.set_tooltip_text(T("delete"))
+                    del_btn.connect("clicked", lambda *_, a=app_name: self._delete_app_profile(a))
+                    actions_box.append(del_btn)
+
+                    card.append(actions_box)
+                    grid_flow.append(card)
+
+                self.app_profiles_list_box.append(grid_flow)
             else:
+                # Render List Layout
                 for idx, (app_name, val) in enumerate(app_profiles.items()):
                     if isinstance(val, dict):
                         profile = val.get("profile", "balanced")

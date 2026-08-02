@@ -33,14 +33,17 @@ class LinuxEcController:
     def __init__(self):
         self._lock = threading.Lock()
         self.capabilities = detect_capabilities()
-        self.board_id = get_board_id()
+        self.board_id = get_board_id() or "UNKNOWN"
         self.product_name = get_product_name()
         
         # Check if direct EC access is safe on this board
         self.is_unsafe_ec_model = not self.capabilities.supports_fan_control_ec
         self.has_ec_access = False
         
-        if not self.is_unsafe_ec_model:
+        # We need EC access for fan control OR for thermal fallback on specific boards
+        self.needs_ec_fallback = self.board_id in ("8E35", "8A43")
+        
+        if not self.is_unsafe_ec_model or self.needs_ec_fallback:
             self._ensure_ec_sys()
             self.has_ec_access = os.path.exists(EC_PATH)
         else:
@@ -48,16 +51,61 @@ class LinuxEcController:
 
     def _ensure_ec_sys(self):
         """Ensure ec_sys module is loaded with write_support=1."""
-        if not os.path.exists(EC_PATH):
+        if os.path.exists(EC_PATH):
+            return  # Already available
+
+        # ec0/io lives under debugfs — make sure it is mounted first.
+        debugfs_base = "/sys/kernel/debug"
+        if not os.path.ismount(debugfs_base):
             try:
-                logger.info("Trying to load ec_sys kernel module with write_support=1...")
-                subprocess.run(["modprobe", "ec_sys", "write_support=1"], capture_output=True, timeout=5)
+                subprocess.run(["mount", "-t", "debugfs", "none", debugfs_base],
+                               capture_output=True, timeout=5)
+                logger.info("Mounted debugfs at %s", debugfs_base)
             except Exception as e:
-                logger.debug("modprobe ec_sys failed: %s", e)
+                logger.debug("Could not mount debugfs: %s", e)
+
+        try:
+            logger.info("Trying to load ec_sys kernel module with write_support=1...")
+            subprocess.run(["modprobe", "ec_sys", "write_support=1"], capture_output=True, timeout=5)
+        except Exception as e:
+            logger.debug("modprobe ec_sys failed: %s", e)
+
+        if not os.path.exists(EC_PATH):
+            if os.path.exists("/sys/kernel/security/lockdown"):
+                try:
+                    with open("/sys/kernel/security/lockdown") as f:
+                        ld = f.read().strip()
+                        if "[integrity]" in ld or "[confidentiality]" in ld:
+                            logger.warning(
+                                "EC fallback unavailable: Kernel lockdown is active, "
+                                "likely due to Secure Boot. ec_sys write_support is blocked."
+                            )
+                except Exception:
+                    pass
+
+    def try_lazy_ec_load(self) -> bool:
+        """Attempt a fresh ec_sys load at runtime and refresh has_ec_access.
+
+        Called by fan_service when EC is needed but was not available at boot
+        (e.g. ec_sys not installed yet, but user added it later).
+        Returns True if EC access is now available.
+        """
+        if self.has_ec_access:
+            return True
+        if self.is_unsafe_ec_model and not self.needs_ec_fallback:
+            return False
+        self._ensure_ec_sys()
+        self.has_ec_access = os.path.exists(EC_PATH)
+        if self.has_ec_access:
+            logger.info("Lazy EC load succeeded for board %s", self.board_id)
+        return self.has_ec_access
 
     def read_byte(self, reg: int) -> int:
         """Read a single byte from the EC register."""
-        if not self.has_ec_access or self.is_unsafe_ec_model:
+        if not self.has_ec_access:
+            return 0
+        # If unsafe, only allow safe thermal registers for fallback
+        if self.is_unsafe_ec_model and reg not in (0x59, REG_PERF_MODE):
             return 0
         with self._lock:
             try:
@@ -75,7 +123,10 @@ class LinuxEcController:
 
     def write_byte(self, reg: int, val: int) -> bool:
         """Write a single byte to the EC register."""
-        if not self.has_ec_access or self.is_unsafe_ec_model:
+        if not self.has_ec_access:
+            return False
+        # If unsafe, only allow safe thermal registers for fallback
+        if self.is_unsafe_ec_model and reg not in (0x59, REG_PERF_MODE):
             return False
         with self._lock:
             try:
@@ -117,8 +168,27 @@ class LinuxEcController:
 
     def set_perf_mode(self, mode: str) -> bool:
         """Set performance mode directly via EC."""
-        if self.is_unsafe_ec_model or not self.has_ec_access:
+        if not self.has_ec_access:
             return False
+            
+        # EC Fallback for 8E35 and 8A43 (broken WMI methods _SB.WMID.WQBZ)
+        if self.board_id in ("8E35", "8A43"):
+            fallback_map = {
+                "performance": 0x31,
+                "max": 0x31,
+                "default": 0x30,
+                "auto": 0x30,
+                "balanced": 0x30,
+                "cool": 0x50,
+                "eco": 0x50,
+            }
+            val = fallback_map.get(mode.lower(), 0x30)
+            logger.info("Using EC Fallback for %s to set thermal profile: 0x%02X at 0x59", self.board_id, val)
+            return self.write_byte(0x59, val)
+
+        if self.is_unsafe_ec_model:
+            return False
+
         mode_map = {
             "default": 0x30,
             "auto": 0x30,

@@ -1,124 +1,126 @@
 #!/usr/bin/env python3
 """OMEN Command Center for Linux — MUX (GPU Switch) Microservice."""
 
-import json, os, re, shutil, subprocess, sys, threading, time, typing
+import json, os, subprocess, threading, typing, sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from common.logging_config import setup_logging
 from common.config import ServiceConfig
 from common.sysfs import sysfs_read, sysfs_write, sysfs_exists
-from common.dbus_helpers import run_service, system_sleeping
+from common.dbus_helpers import run_service
 
 logger = setup_logging("mux")
 
-VALID_GPU_MODES = {"hybrid", "discrete", "integrated"}
+VALID_GPU_MODES = {"hybrid", "discrete"}
+
+# Native WMI MUX sysfs path provided by our custom hp-rgb-lighting module
+HP_WMI_GRAPHICS_MODE_PATH = "/sys/devices/platform/hp-rgb-lighting/omen_mux"
 
 
-class MUXController:
+class NativeWmiMuxController:
+    """
+    WMI Orchestrator for MUX switching.
+    Uses the native Linux hp-rgb-lighting driver, which interacts with the exact same
+    ACPI/WMI methods (CommandType 0x52, command 0x00002) as OmenFlow on Windows.
+    
+    Modes:
+      - 0: Hybrid (Optimus)
+      - 1: Discrete
+    """
     def __init__(self):
-        self.envycontrol = shutil.which("envycontrol")
-        self.supergfxctl = shutil.which("supergfxctl")
-        self.prime_select = shutil.which("prime-select")
-        self.backend: typing.Optional[str] = None
+        self.backend = "wmi-native"
         self._cached_mode = "unknown"
-        self._last_check = 0.0
 
-    def detect_backend(self, forced="auto"):
-        available = self.get_available_backends()
-        if forced != "auto" and forced in available:
-            self.backend = forced
-            logger.info("MUX backend: %s (forced)", self.backend)
-            return
-        if "envycontrol" in available:
-            self.backend = "envycontrol"
-        elif "supergfxctl" in available:
-            self.backend = "supergfxctl"
-        elif "prime-select" in available:
-            self.backend = "prime-select"
-        else:
-            self.backend = None
-        logger.info("MUX backend: %s (auto)", self.backend or "none")
+    def is_available(self) -> bool:
+        return sysfs_exists(HP_WMI_GRAPHICS_MODE_PATH)
 
-    def get_available_backends(self):
-        b = []
-        if self.envycontrol: b.append("envycontrol")
-        if self.supergfxctl: b.append("supergfxctl")
-        if self.prime_select: b.append("prime-select")
-        return b
+    def get_available_backends(self) -> typing.List[str]:
+        if self.is_available():
+            return [self.backend]
+        return []
 
-    def set_backend(self, backend):
-        if backend in self.get_available_backends():
-            self.backend = backend
-            self._cached_mode = "unknown"
-            self._last_check = 0.0
-            logger.info("MUX backend switched to: %s", backend)
+    def get_backend(self) -> str:
+        return self.backend if self.is_available() else "none"
+
+    def set_backend(self, backend: str) -> bool:
+        if backend == self.backend and self.is_available():
             return True
         return False
 
-    def is_available(self):
-        return self.backend is not None
-
-    def get_backend(self):
-        return self.backend or "none"
-
-    @staticmethod
-    def _normalize_mode(raw_mode):
-        mode = str(raw_mode or "").strip().lower()
-        word_tokens = set(re.findall(r"[a-z]+", mode))
-        if "hybrid" in word_tokens or "on-demand" in mode or ("on" in word_tokens and "demand" in word_tokens):
-            return "hybrid"
-        if "offload" in word_tokens and "nvidia" in word_tokens:
-            return "hybrid"
-        if "integrated" in word_tokens or "intel" in word_tokens or "igpu" in word_tokens:
-            return "integrated"
-        if "discrete" in word_tokens or "dedicated" in word_tokens or "nvidia" in word_tokens or "dgpu" in word_tokens:
-            return "discrete"
-        return "unknown"
-
-    def get_mode(self):
-        now = time.time()
-        if now - self._last_check < 10.0:
+    def get_mode(self) -> str:
+        if not self.is_available():
+            return "unknown"
+            
+        if self._cached_mode != "unknown":
             return self._cached_mode
-        mode = "unknown"
+            
         try:
-            if self.backend == "envycontrol" and self.envycontrol:
-                mode = subprocess.check_output([self.envycontrol, "--query"], stderr=subprocess.STDOUT, timeout=5).decode().strip().lower()
-            elif self.backend == "supergfxctl" and self.supergfxctl:
-                mode = subprocess.check_output([self.supergfxctl, "-g"], stderr=subprocess.STDOUT, timeout=5).decode().strip().lower()
-            elif self.backend == "prime-select" and self.prime_select:
-                mode = subprocess.check_output([self.prime_select, "query"], stderr=subprocess.STDOUT, timeout=5).decode().strip().lower()
+            # First, check DRM display outputs to see if internal display is connected to NVIDIA
+            # This is much more reliable on modern laptops where both GPUs remain on the PCIe bus
+            import glob, os
+            edp_on_nvidia = False
+            for card in glob.glob("/sys/class/drm/card[0-9]*"):
+                basename = os.path.basename(card).upper()
+                if "EDP" in basename:
+                    try:
+                        with open(os.path.join(card, "status")) as f:
+                            if f.read().strip() == "connected":
+                                parent = os.path.realpath(os.path.join(card, "device", "device"))
+                                vendor_file = os.path.join(parent, "vendor")
+                                if os.path.exists(vendor_file):
+                                    with open(vendor_file) as vf:
+                                        if vf.read().strip().lower() == "0x10de":
+                                            edp_on_nvidia = True
+                    except Exception:
+                        pass
+                        
+            if edp_on_nvidia:
+                self._cached_mode = "discrete"
+                return self._cached_mode
+                
+            # Fallback to lspci detection
+            lspci_out = subprocess.check_output(["lspci", "-D"], text=True).strip().lower()
+            
+            has_nvidia = False
+            has_igpu = False
+            
+            for line in lspci_out.split('\n'):
+                if "vga compatible controller" in line or "3d controller" in line or "display controller" in line:
+                    if "nvidia" in line:
+                        has_nvidia = True
+                    elif "intel" in line or "amd" in line or "advanced micro devices" in line:
+                        has_igpu = True
+            
+            if has_nvidia and not has_igpu:
+                self._cached_mode = "discrete"
+            elif has_nvidia and has_igpu:
+                self._cached_mode = "hybrid"
+            else:
+                self._cached_mode = "unknown"
         except Exception as e:
             logger.debug("MUX get_mode error: %s", e)
-        self._cached_mode = self._normalize_mode(mode)
-        self._last_check = now
+            
         return self._cached_mode
 
-    def set_mode(self, mode):
+    def set_mode(self, mode: str) -> str:
+        if not self.is_available():
+            return "Error: WMI MUX interface not found"
+            
         if mode not in VALID_GPU_MODES:
             return f"Error: Invalid mode '{mode}'"
+            
         try:
-            if self.backend == "envycontrol" and self.envycontrol:
-                m = {"hybrid":"hybrid","discrete":"nvidia","integrated":"integrated"}.get(mode)
-                if m is None:
-                    return f"Error: Unsupported mode '{mode}' for envycontrol"
-                subprocess.run([self.envycontrol, "-s", m], check=True, timeout=10)
-            elif self.backend == "supergfxctl" and self.supergfxctl:
-                m = {"hybrid":"Hybrid","discrete":"Dedicated","integrated":"Integrated"}.get(mode)
-                if m is None:
-                    return f"Error: Unsupported mode '{mode}' for supergfxctl"
-                subprocess.run([self.supergfxctl, "-m", m], check=True, timeout=10)
-            elif self.backend == "prime-select" and self.prime_select:
-                m = {"hybrid":"on-demand","discrete":"nvidia","integrated":"intel"}.get(mode)
-                if m is None:
-                    return f"Error: Unsupported mode '{mode}' for prime-select"
-                subprocess.run([self.prime_select, m], check=True, timeout=10)
+            val = "0" if mode == "hybrid" else "1"
+            success = sysfs_write(HP_WMI_GRAPHICS_MODE_PATH, val)
+            if success:
+                self._cached_mode = mode
+                # WMI hardware MUX switch always requires a reboot to take effect
+                return "OK_REBOOT_REQUIRED"
             else:
-                return "No backend"
-            self._cached_mode = mode
-            self._last_check = time.time()
-            return "OK"
+                return "Error: Failed to write to WMI sysfs"
         except Exception as e:
+            logger.error("WMI MUX set_mode error: %s", e)
             return f"Error: {e}"
 
 
@@ -134,62 +136,65 @@ class MUXService:
     </node>
     """
     def __init__(self):
-        self._mux = MUXController()
+        self._mux = NativeWmiMuxController()
         self._config = ServiceConfig("mux", {"mux_backend": "auto"})
         self._config.load()
-        self._mux.detect_backend(self._config.get("mux_backend", "auto"))
         self._cache_lock = threading.Lock()
-        self._gpu_cache = {
+        self._displays_cache = None
+        
+    def _get_displays(self):
+        if self._displays_cache is not None:
+            return self._displays_cache
+        import glob, os
+        conns = []
+        vendors = {"0x10de": "NVIDIA", "0x8086": "Intel", "0x1002": "AMD"}
+        for card in glob.glob("/sys/class/drm/card[0-9]*"):
+            if "-" in os.path.basename(card):
+                try:
+                    with open(os.path.join(card, "status")) as f:
+                        if f.read().strip() == "connected":
+                            parent = os.path.realpath(os.path.join(card, "device", "device"))
+                            vendor_file = os.path.join(parent, "vendor")
+                            vendor_name = "Unknown"
+                            if os.path.exists(vendor_file):
+                                with open(vendor_file) as vf:
+                                    v_id = vf.read().strip()
+                                    vendor_name = vendors.get(v_id, "Unknown GPU")
+                            
+                            disp_name = os.path.basename(card).split("-", 1)[1]
+                            conns.append({"display": disp_name, "gpu": vendor_name})
+                except Exception:
+                    pass
+        self._displays_cache = conns
+        return conns
+
+    def _get_current_info(self):
+        return {
             "available": self._mux.is_available(),
             "backend": self._mux.get_backend(),
             "available_backends": self._mux.get_available_backends(),
             "forced_backend": self._config.get("mux_backend", "auto"),
-            "mode": "unknown",
+            "mode": self._mux.get_mode(),
+            "displays": self._get_displays(),
         }
-        threading.Thread(target=self._poll_loop, daemon=True).start()
-
-    def _poll_loop(self):
-        while True:
-            if system_sleeping.is_set():
-                time.sleep(0.5); continue
-            snap = {
-                "available": self._mux.is_available(),
-                "backend": self._mux.get_backend(),
-                "available_backends": self._mux.get_available_backends(),
-                "forced_backend": self._config.get("mux_backend", "auto"),
-                "mode": self._mux.get_mode(),
-            }
-            with self._cache_lock:
-                self._gpu_cache = snap
-            time.sleep(30.0)
 
     def SetGpuMode(self, mode):
-        if mode not in VALID_GPU_MODES: return "FAIL"
+        if mode not in VALID_GPU_MODES: 
+            return "FAIL"
         result = self._mux.set_mode(mode)
-        if result in ("OK", "OK_REBOOT_REQUIRED"):
-            with self._cache_lock: self._gpu_cache["mode"] = mode
         return result
 
     def GetGpuInfo(self):
-        with self._cache_lock: data = dict(self._gpu_cache)
-        data["forced_backend"] = self._config.get("mux_backend", "auto")
+        with self._cache_lock:
+            data = self._get_current_info()
         return json.dumps(data)
 
     def SetMuxBackend(self, backend):
         logger.info("SetMuxBackend: %s", backend)
-        if backend == "auto":
-            self._config.set("mux_backend", "auto"); self._config.save()
-            self._mux.detect_backend("auto")
-            with self._cache_lock:
-                self._gpu_cache["backend"] = self._mux.get_backend()
-                self._gpu_cache["forced_backend"] = "auto"
-            return "OK"
-        if self._mux.set_backend(backend):
-            self._config.set("mux_backend", backend); self._config.save()
-            with self._cache_lock:
-                self._gpu_cache["backend"] = backend
-                self._gpu_cache["forced_backend"] = backend
-                self._gpu_cache["mode"] = "unknown"
+        # We only support wmi-native now
+        if backend in ("auto", "wmi-native"):
+            self._config.set("mux_backend", backend)
+            self._config.save()
             return "OK"
         return "FAIL"
 
@@ -201,6 +206,9 @@ def main():
     svc = MUXService()
     if svc._mux.is_available():
         logger.info("MUX backend: %s", svc._mux.get_backend())
+    else:
+        logger.warning("MUX interface (%s) not available on this system.", HP_WMI_GRAPHICS_MODE_PATH)
+        
     run_service("com.yyl.hpmanager.mux", svc, service_name="mux")
 
 if __name__ == "__main__":

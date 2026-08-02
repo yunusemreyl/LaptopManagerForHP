@@ -26,16 +26,24 @@ MOK_DIR="/var/lib/hp-manager/mok"
 KVER_MAJOR=$(uname -r | cut -d. -f1)
 KVER_MINOR=$(uname -r | cut -d. -f2)
 BOARD_NAME=$(cat /sys/devices/virtual/dmi/id/board_name 2>/dev/null | tr '[:lower:]' '[:upper:]' || echo "")
-FORCE_CUSTOM_HPWMI=false
-
-# Some boards still require the patched hp-wmi path even on kernel 7.0+.
-case "$BOARD_NAME" in
-    8D41|8BCD) FORCE_CUSTOM_HPWMI=true ;; # OMEN Max 16 and 16-xd0xxx
-esac
+FORCE_CUSTOM_HPWMI=true
 
 STOCK_FAN_SUPPORT=false
 if [ "$KVER_MAJOR" -gt 7 ] || { [ "$KVER_MAJOR" -eq 7 ] && [ "$KVER_MINOR" -ge 0 ]; }; then
     STOCK_FAN_SUPPORT=true
+    # Verify stock hp-wmi actually exists in the kernel tree (e.g. some Zen/Arch kernels omit it)
+    if ! modinfo hp-wmi &>/dev/null; then
+        # Check if the kernel tree is simply missing due to a pending reboot (common on Arch/CachyOS)
+        if [ ! -e "/lib/modules/$(uname -r)/modules.dep" ] && [ ! -e "/usr/lib/modules/$(uname -r)/modules.dep" ]; then
+            echo -e "${RED}[ERROR] Kernel modules for $(uname -r) are missing or broken.${NC}"
+            echo -e "${RED}[ERROR] This usually means you updated your kernel but haven't rebooted.${NC}"
+            echo -e "${RED}[ERROR] Please reboot your system and run the installer again.${NC}"
+            exit 1
+        fi
+        echo -e "${YELLOW}[WARN] Kernel >= 7.0 detected but stock hp-wmi module is missing. Forcing custom hp-wmi build.${NC}"
+        STOCK_FAN_SUPPORT=false
+        FORCE_CUSTOM_HPWMI=true
+    fi
 fi
 if $FORCE_CUSTOM_HPWMI; then
     STOCK_FAN_SUPPORT=false
@@ -194,7 +202,10 @@ do_install() {
     install_deps
 
     if $FORCE_CUSTOM_HPWMI; then
-        warn "Board ${BOARD_NAME:-unknown} detected — forcing custom hp-wmi install path on kernel $(uname -r)."
+        case "$BOARD_NAME" in
+            8D41|8D42|8BCD) warn "Board ${BOARD_NAME:-unknown} detected — forcing custom hp-wmi install path on kernel $(uname -r)." ;;
+            *) warn "Forcing custom hp-wmi install path on kernel $(uname -r)." ;;
+        esac
     fi
 
     # Detect Clang-built kernel and set LLVM=1 automatically
@@ -248,7 +259,11 @@ DEST_MODULE_LOCATION[0]="/kernel/drivers/platform/x86/hp"
 AUTOINSTALL="yes"
 DKMSRGB
     else
-        info "Kernel $(uname -r) detected (< 7.0) — installing both hp-wmi and hp-rgb-lighting..."
+        if [ "$KVER_MAJOR" -gt 7 ] || { [ "$KVER_MAJOR" -eq 7 ] && [ "$KVER_MINOR" -ge 0 ]; }; then
+            info "Kernel $(uname -r) detected (>= 7.0) but custom hp-wmi is forced — installing both hp-wmi and hp-rgb-lighting..."
+        else
+            info "Kernel $(uname -r) detected (< 7.0) — installing both hp-wmi and hp-rgb-lighting..."
+        fi
 
         info "Checking for stock hp-wmi driver path..."
         # FIX: modinfo -n resolves symlinks and works on both /lib and /usr/lib
@@ -272,6 +287,37 @@ DKMSRGB
 
     # Refresh module dependency database so modprobe picks up the new .ko
     depmod -a
+
+    # ── Post-install verification ────────────────────────────────────────────
+    # Some distros (Nobara, certain Fedora spins) lack /usr/sbin/weak-modules,
+    # which causes DKMS to silently skip the final copy step.  We verify that
+    # the compiled .ko is actually reachable by modinfo; if not, force-reinstall
+    # targeting the running kernel explicitly.
+    info "Verifying DKMS module installation..."
+    _dkms_verify_ok=true
+
+    if ! modinfo hp-rgb-lighting &>/dev/null; then
+        warn "hp-rgb-lighting not found by modinfo after DKMS install — retrying with --force..."
+        dkms install -m "$MODNAME" -v "$MODVER" -k "$(uname -r)" --force 2>/dev/null || true
+        depmod -a
+        if ! modinfo hp-rgb-lighting &>/dev/null; then
+            _dkms_verify_ok=false
+            warn "hp-rgb-lighting STILL not found after forced reinstall."
+            warn "Try manually: sudo dkms install $MODNAME/$MODVER -k $(uname -r) --force"
+        fi
+    fi
+
+    if ! $STOCK_FAN_SUPPORT; then
+        if ! modinfo hp-wmi 2>/dev/null | grep -q "dkms\|updates\|extra"; then
+            warn "Custom hp-wmi not found in expected DKMS/updates path — retrying..."
+            dkms install -m "$MODNAME" -v "$MODVER" -k "$(uname -r)" --force 2>/dev/null || true
+            depmod -a
+        fi
+    fi
+
+    if $_dkms_verify_ok; then
+        ok "DKMS module verified: $(modinfo -n hp-rgb-lighting 2>/dev/null || echo 'path unknown')"
+    fi
 
     # After DKMS install succeeds, archive stock hp-wmi so the DKMS module wins consistently.
     if ! $STOCK_FAN_SUPPORT && [[ -n "$ORIG_WMI" ]] && [[ -f "$ORIG_WMI" ]]; then
@@ -312,6 +358,8 @@ DKMSRGB
             "/usr/src/kernels/$KVER/scripts" \
             "/lib/modules/$KVER/build/scripts" \
             "/usr/lib/modules/$KVER/build/scripts" \
+            "/usr/src/linux-headers-$KVER" \
+            "/usr/lib/modules/$KVER" \
             -name "sign-file" -type f 2>/dev/null | head -n 1)
 
         if [ -n "$SIGN_SCRIPT" ]; then
@@ -326,13 +374,14 @@ DKMSRGB
                 fi
             done
         else
-            warn "sign-file script not found! Modules could not be signed. Secure Boot may block them."
+            warn "sign-file script not found in kernel headers!"
+            warn "Modules could not be signed. Secure Boot will block them unless you sign them manually or disable Secure Boot."
         fi
 
         # Enrol MOK if not yet enrolled
         if mokutil --test-key "$MOK_DIR/MOK.der" 2>/dev/null | grep -qi "not enrolled"; then
             info "Enrolling MOK key..."
-            MOK_PASSWORD=$(tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 16 || true)
+            MOK_PASSWORD="omen"
             printf "%s\n%s\n" "$MOK_PASSWORD" "$MOK_PASSWORD" | mokutil --import "$MOK_DIR/MOK.der" 2>/dev/null \
                 || warn "Failed to import MOK key."
 

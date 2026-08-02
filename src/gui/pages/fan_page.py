@@ -13,6 +13,8 @@ gi.require_version('Gtk', '4.0')
 from gi.repository import Gtk, GLib, Gdk, GObject
 from widgets.smooth_scroll import SmoothScrolledWindow
 from widgets.fan_curve import FanCurveWidget
+from components.custom_widgets import OmenHighTechGauge, OmenSpecsBridge
+from utils.system_monitor import SystemMonitor
 import cairo
 
 DEFAULT_MODE_SYNC_DELAY_MS = 1500
@@ -59,639 +61,6 @@ def hsv_to_rgb(h, s, v):
 #  HIGH-FIDELITY CAIRO INSTRUMENT PANELS
 # ═════════════════════════════════════════════════════════════════════════════
 
-class OmenHighTechGauge(Gtk.DrawingArea):
-    """Circular gauge replicating the OMEN speedometer design, scaled up."""
-
-    def __init__(self, label="CPU", is_left=True, active_color=(0.66, 0.33, 0.97)):
-        super().__init__()
-        self.label = label
-        self.is_left = is_left  # True for Left Gauge (CPU), False for Right (GPU)
-        self.active_color = active_color
-        
-        self.usage = 0.0
-        self.temp = 0.0
-        self.speed = "0.00GHz"
-        self.rpm = 0
-        self.rotation = 0.0
-        self.is_dark = True
-        
-        self.set_size_request(260, 260)
-        self.set_draw_func(self._draw)
-
-    def set_dark(self, is_dark):
-        self.is_dark = is_dark
-        self.queue_draw()
-
-    def set_val(self, usage, temp, speed, rpm):
-        self.usage = float(usage)
-        self.temp = float(temp)
-        self.speed = str(speed)
-        self.rpm = int(rpm)
-        self.queue_draw()
-
-    def tick_rotation(self):
-        if self.rpm > 0:
-            speed = 0.03 + (self.rpm / 6000.0) * 0.15
-            self.rotation += speed
-            if self.rotation >= 2 * math.pi:
-                self.rotation -= 2 * math.pi
-            self.queue_draw()
-
-    def _draw(self, _, cr, w, h):
-        cx, cy = w / 2, h / 2 - 12
-        r_main = 94
-        r_tick_out = 85
-        r_tick_in = 75
-        
-        # ── 1. Outer Temperature Arc & Ticks (Thicker and Offset) ──
-        cr.set_line_width(5.5) # Even thicker temperature curves as requested
-        
-        if self.is_left:
-            # CPU Temp Arc: Top-Left from 125° to 215°
-            start_angle = 125 * math.pi / 180
-            end_angle = 215 * math.pi / 180
-            temp_pct = max(0.0, min(100.0, self.temp)) / 100.0
-            fill_angle = start_angle + temp_pct * (end_angle - start_angle)
-            
-            # Base track
-            if self.is_dark:
-                cr.set_source_rgba(255, 255, 255, 0.05)
-            else:
-                cr.set_source_rgba(0, 0, 0, 0.06)
-            cr.arc(cx, cy, r_main + 16, start_angle, end_angle)
-            cr.stroke()
-            
-            # Dynamic color coding based on temp threshold
-            if self.temp >= 80.0:
-                arc_color = (0.94, 0.23, 0.23) # Red / Hot
-            elif self.temp >= 68.0:
-                arc_color = (0.96, 0.62, 0.15) # Amber / Warm
-            else:
-                arc_color = self.active_color
-
-            # Fill track
-            cr.set_source_rgba(*arc_color, 0.85)
-            cr.arc(cx, cy, r_main + 16, start_angle, fill_angle)
-            cr.stroke()
-            
-            # Label temperature e.g. "51°C" bold, italic, and exactly ON TOP of the curve
-            cr.select_font_face("Sans", cairo.FONT_SLANT_ITALIC, cairo.FONT_WEIGHT_BOLD)
-            cr.set_font_size(18)
-            cr.set_source_rgba(*arc_color, 0.95)
-            cr.move_to(cx - 100, cy - 76) # Slightly larger label for clearer visibility
-            cr.show_text(f"{int(self.temp)}°C")
-        else:
-            # GPU Temp Arc: Top-Right from 325° to 415°
-            start_angle = 325 * math.pi / 180
-            end_angle = 415 * math.pi / 180
-            temp_pct = max(0.0, min(100.0, self.temp)) / 100.0
-            fill_angle = start_angle + temp_pct * (end_angle - start_angle)
-            
-            # Base track
-            if self.is_dark:
-                cr.set_source_rgba(255, 255, 255, 0.05)
-            else:
-                cr.set_source_rgba(0, 0, 0, 0.06)
-            cr.arc(cx, cy, r_main + 16, start_angle, end_angle)
-            cr.stroke()
-            
-            # Dynamic color coding based on temp threshold
-            if self.temp >= 80.0:
-                arc_color = (0.94, 0.23, 0.23) # Red / Hot
-            elif self.temp >= 68.0:
-                arc_color = (0.96, 0.62, 0.15) # Amber / Warm
-            else:
-                arc_color = self.active_color
-
-            # Fill track
-            cr.set_source_rgba(*arc_color, 0.85)
-            cr.arc(cx, cy, r_main + 16, start_angle, fill_angle)
-            cr.stroke()
-            
-            # Label temperature e.g. "0°C" bold, italic, and exactly ON TOP of the curve
-            cr.select_font_face("Sans", cairo.FONT_SLANT_ITALIC, cairo.FONT_WEIGHT_BOLD)
-            cr.set_font_size(18)
-            cr.set_source_rgba(*arc_color, 0.95)
-            cr.move_to(cx + 62, cy - 76) # Slightly larger label for clearer visibility
-            cr.show_text(f"{int(self.temp)}°C")
-
-        # ── 2. Speedometer Radial Ticks (Thicker) ──
-        num_ticks = 72
-        angle_step = 2 * math.pi / num_ticks
-        
-        for i in range(num_ticks):
-            angle = -math.pi / 2 + i * angle_step
-            is_active = (i / num_ticks) <= (self.usage / 100.0)
-            
-            cr.save()
-            if is_active:
-                cr.set_source_rgba(self.active_color[0], self.active_color[1], self.active_color[2], 0.9)
-                cr.set_line_width(4.5) # Even thicker active ticks as requested
-            else:
-                if self.is_dark:
-                    cr.set_source_rgba(255, 255, 255, 0.06)
-                else:
-                    cr.set_source_rgba(0, 0, 0, 0.08)
-                cr.set_line_width(2.4) # Even thicker inactive ticks as requested
-                
-            x_in = cx + r_tick_in * math.cos(angle)
-            y_in = cy + r_tick_in * math.sin(angle)
-            x_out = cx + r_tick_out * math.cos(angle)
-            y_out = cy + r_tick_out * math.sin(angle)
-            
-            cr.move_to(x_in, y_in)
-            cr.line_to(x_out, y_out)
-            cr.stroke()
-            cr.restore()
-
-        # Outer thick frame boundary line (Thicker)
-        cr.set_line_width(3.0) # Even thicker boundary line as requested
-        if self.is_dark:
-            cr.set_source_rgba(255, 255, 255, 0.04)
-        else:
-            cr.set_source_rgba(0, 0, 0, 0.05)
-        cr.arc(cx, cy, r_main, 0, 2 * math.pi)
-        cr.stroke()
-
-        # ── 3. Central Details ──
-        # Label (CPU / GPU) - Italic and Bold using Sans and a forced shear slant matrix
-        cr.save()
-        cr.select_font_face("Sans", cairo.FONT_SLANT_ITALIC, cairo.FONT_WEIGHT_BOLD)
-        cr.set_font_size(14)
-        cr.set_source_rgba(self.active_color[0], self.active_color[1], self.active_color[2], 0.85)
-        
-        # Mathematically shear/slant font matrix to guarantee beautiful italic slant on all systems
-        font_matrix = cr.get_font_matrix()
-        font_matrix.xy = -0.25 * font_matrix.xx
-        cr.set_font_matrix(font_matrix)
-        
-        te = cr.text_extents(self.label)
-        cr.move_to(cx - te.width / 2, cy - r_tick_in * 0.35)
-        cr.show_text(self.label)
-        cr.restore()
-        
-        # Usage Value
-        val_txt = f"{int(self.usage)}%"
-        cr.select_font_face("Inter", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
-        cr.set_font_size(32)
-        if self.is_dark:
-            cr.set_source_rgba(1.0, 1.0, 1.0, 0.95)
-        else:
-            cr.set_source_rgba(0.09, 0.11, 0.16, 0.95)
-        te = cr.text_extents(val_txt)
-        cr.move_to(cx - te.width / 2, cy + te.height / 2 - 3)
-        cr.show_text(val_txt)
-        
-        # Clock Speed
-        cr.select_font_face("Inter", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_NORMAL)
-        cr.set_font_size(10)
-        if self.is_dark:
-            cr.set_source_rgba(0.55, 0.60, 0.68, 0.7)
-        else:
-            cr.set_source_rgba(0.27, 0.33, 0.41, 0.8)
-        te = cr.text_extents(self.speed)
-        cr.move_to(cx - te.width / 2, cy + r_tick_in * 0.52)
-        cr.show_text(self.speed)
-
-        # ── 4. Fan Speed RPM text centered under dial (whiter, larger, italic, and bold) ──
-        cr.select_font_face("Inter", cairo.FONT_SLANT_ITALIC, cairo.FONT_WEIGHT_BOLD)
-        cr.set_font_size(13)
-        if self.is_dark:
-            cr.set_source_rgba(0.9, 0.94, 1.0, 0.95)
-        else:
-            cr.set_source_rgba(0.1, 0.11, 0.15, 0.95)
-        rpm_txt = f"{self.rpm} RPM"
-        te = cr.text_extents(rpm_txt)
-        cr.move_to(cx - te.width / 2, cy + r_main + 26)
-        cr.show_text(rpm_txt)
-
-
-class OmenSpecsBridge(Gtk.DrawingArea):
-    """Compact bridging bar for RAM, Disk, and Battery metrics."""
-
-    def __init__(self, size_w=160, size_h=52, color=(0.24, 0.60, 1.0)):
-        super().__init__()
-        self.set_size_request(size_w, size_h)
-        self.pct = 0.0
-        self.text = ""
-        self.color = color
-        self.is_dark = True
-        self.set_draw_func(self._draw)
-
-    def set_dark(self, is_dark):
-        self.is_dark = is_dark
-        self.queue_draw()
-
-    def set_val(self, pct, text):
-        self.pct = float(pct)
-        self.text = str(text)
-        self.queue_draw()
-
-    def _draw(self, _, cr, w, h):
-        cx, cy = w / 2, h / 2
-        bar_w = w * 0.90
-        bar_h = 6
-        bar_x = cx - bar_w / 2
-        
-        # ── 1. Thin Translucent Bridge line ──
-        cr.set_line_width(1.0)
-        if self.is_dark:
-            cr.set_source_rgba(255, 255, 255, 0.03)
-        else:
-            cr.set_source_rgba(0, 0, 0, 0.04)
-        cr.move_to(0, cy)
-        cr.line_to(w, cy)
-        cr.stroke()
-        
-        # ── 2. Background Capsule Tube ──
-        if self.is_dark:
-            cr.set_source_rgba(22, 25, 30, 0.95)
-        else:
-            cr.set_source_rgba(0, 0, 0, 0.06)
-        cr.set_line_width(bar_h)
-        cr.set_line_cap(cairo.LINE_CAP_ROUND)
-        cr.move_to(bar_x, cy)
-        cr.line_to(bar_x + bar_w, cy)
-        cr.stroke()
-        
-        # Outer border
-        if self.is_dark:
-            cr.set_source_rgba(255, 255, 255, 0.08)
-        else:
-            cr.set_source_rgba(0, 0, 0, 0.04)
-        cr.set_line_width(bar_h + 1.2)
-        cr.move_to(bar_x, cy)
-        cr.line_to(bar_x + bar_w, cy)
-        cr.stroke()
-
-        # ── 3. Glowing Fill ──
-        fill_w = bar_w * (max(0.0, min(100.0, self.pct)) / 100.0)
-        if fill_w > 0:
-            cr.set_source_rgba(self.color[0], self.color[1], self.color[2], 0.95)
-            cr.set_line_width(bar_h)
-            cr.move_to(bar_x, cy)
-            cr.line_to(bar_x + fill_w, cy)
-            cr.stroke()
-            
-            # Subtle radial shadow/glow
-            cr.set_source_rgba(self.color[0], self.color[1], self.color[2], 0.22)
-            cr.set_line_width(bar_h + 3)
-            cr.move_to(bar_x, cy)
-            cr.line_to(bar_x + fill_w, cy)
-            cr.stroke()
-            
-        # ── 4. Small Pointer Indicator Triangle on top ──
-        px = bar_x + fill_w
-        py = cy - bar_h / 2 - 3
-        if self.is_dark:
-            cr.set_source_rgb(1.0, 1.0, 1.0)
-        else:
-            cr.set_source_rgb(self.color[0], self.color[1], self.color[2])
-        cr.move_to(px, py)
-        cr.line_to(px - 3, py - 4)
-        cr.line_to(px + 3, py - 4)
-        cr.close_path()
-        cr.fill()
-        
-        # ── 5. Details Text under the bar ──
-        cr.select_font_face("Inter", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_NORMAL)
-        cr.set_font_size(10)
-        if self.is_dark:
-            cr.set_source_rgba(0.82, 0.86, 0.92, 0.8)
-        else:
-            cr.set_source_rgba(0.2, 0.25, 0.33, 0.85)
-        te = cr.text_extents(self.text)
-        cr.move_to(cx - te.width / 2, cy + bar_h + 14)
-        cr.show_text(self.text)
-
-# ═════════════════════════════════════════════════════════════════════════════
-#  SYSTEM MONITOR DATA WORKER
-# ═════════════════════════════════════════════════════════════════════════════
-
-class SystemMonitor(threading.Thread):
-    def __init__(self, services_provider):
-        super().__init__(daemon=True)
-        self.services_provider = services_provider
-        self.running = True
-        self._active_event = threading.Event()
-        self._active_event.set()
-        self.lock = threading.Lock()
-        self.data = {
-            "cpu_temp": 0.0,
-            "gpu_temp": 0.0,
-            "cpu_pct": 0.0,
-            "gpu_pct": 0.0,
-            "cpu_freq": "0.00GHz",
-            "gpu_freq": "0.00GHz",
-            "ram_pct": 0.0,
-            "ram_text": "RAM 0% 0.0GB",
-            "disk_pct": 0.0,
-            "disk_text": "DISK 0% 0.0GB",
-            "bat_pct": 0.0,
-            "bat_text": "BAT 0%",
-            "fan_info": {},
-            "power_profile": {},
-            "rgb_state": {},
-            "power_conflict": None,
-            "gamemode": "Inactive",
-            "all_sensors": [],
-            "gpu_tgp_state": False,
-            "gpu_ppab_state": False,
-        }
-        self._conflict_cache = None
-        self._conflict_counter = 0
-        self._nvidia_smi = shutil.which("nvidia-smi") or ""
-
-    def set_active(self, active):
-        if active:
-            self._active_event.set()
-        else:
-            self._active_event.clear()
-
-    def run(self):
-        while self.running:
-            if not self._active_event.is_set():
-                time.sleep(4.0)
-                continue
-
-            c, g = 0.0, 0.0
-            fi, pp, si, rg = {}, {}, {}, {}
-            services = self.services_provider()
-
-            # D-Bus reads
-            if services:
-                platform_svc = services.get("platform")
-                fan_svc = services.get("fan")
-                power_svc = services.get("power")
-                rgb_svc = services.get("rgb")
-
-                if platform_svc:
-                    try:
-                        raw = _dbus_call(platform_svc.GetSystemInfo)
-                        if raw is not None:
-                            si = json.loads(raw)
-                            c = si.get("cpu_temp", 0.0)
-                            g = si.get("gpu_temp", 0.0)
-                    except Exception: pass
-
-                if fan_svc:
-                    try:
-                        raw = _dbus_call(fan_svc.GetFanInfo)
-                        if raw is not None:
-                            fi = json.loads(raw)
-                    except Exception: pass
-
-                if power_svc:
-                    try:
-                        raw = _dbus_call(power_svc.GetPowerProfile)
-                        if raw is not None:
-                            pp = json.loads(raw)
-                    except Exception: pass
-
-                if rgb_svc:
-                    try:
-                        raw = _dbus_call(rgb_svc.GetState)
-                        if raw is not None:
-                            rg = json.loads(raw)
-                    except Exception: pass
-
-            # CPU / GPU Utilization and speeds
-            cpu_pct = 0.0
-            try:
-                with open("/proc/stat") as f:
-                    cpu = f.readline().strip().split()
-                vals = [int(x) for x in cpu[1:9]]
-                idle_all = vals[3] + vals[4]
-                total = sum(vals)
-                cpu_pct = max(0.0, min(100.0, (1.0 - (idle_all / total)) * 100.0))
-            except Exception: pass
-
-            cpu_freq = "3.20GHz"
-            try:
-                with open("/sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq") as f:
-                    val = int(f.read().strip())
-                    cpu_freq = f"{val / 1000000:.2f}GHz"
-            except Exception:
-                try:
-                    with open("/proc/cpuinfo") as f:
-                        for line in f:
-                            if line.startswith("cpu MHz"):
-                                cpu_freq = f"{float(line.split(':')[1].strip()) / 1000:.2f}GHz"
-                                break
-                except Exception: pass
-
-            gpu_pct = 0.0
-            gpu_freq = "0.00GHz"
-            if self._nvidia_smi:
-                try:
-                    out_pct = subprocess.check_output(
-                        [self._nvidia_smi, "--query-gpu=utilization.gpu", "--format=csv,noheader,nounits"],
-                        stderr=subprocess.DEVNULL, timeout=1.5
-                    ).decode().strip()
-                    if out_pct:
-                        gpu_pct = float(out_pct.splitlines()[0])
-
-                    out_freq = subprocess.check_output(
-                        [self._nvidia_smi, "--query-gpu=clocks.gr", "--format=csv,noheader,nounits"],
-                        stderr=subprocess.DEVNULL, timeout=1.5
-                    ).decode().strip()
-                    if out_freq:
-                        gpu_freq = f"{float(out_freq.splitlines()[0]) / 1000:.2f}GHz"
-                except Exception: pass
-
-            # RAM percentage and text
-            ram_pct = 0.0
-            ram_text = "RAM 0% 0.0GB"
-            try:
-                mem = {}
-                with open("/proc/meminfo") as f:
-                    for line in f:
-                        k, v = line.split(":", 1)
-                        mem[k.strip()] = int(v.split()[0])
-                mt = mem.get("MemTotal", 1)
-                ma = mem.get("MemAvailable", mt)
-                used = mt - ma
-                ram_pct = (used / mt) * 100
-                used_gb = used / (1024 * 1024)
-                total_gb = mt / (1024 * 1024)
-                ram_text = f"RAM {int(ram_pct)}% {used_gb:.1f}GB / {total_gb:.0f}GB"
-            except Exception: pass
-
-            # Disk percentage and text
-            disk_pct = 0.0
-            disk_text = "DISK 0% 0.0GB"
-            try:
-                total, used, free = shutil.disk_usage("/")
-                if total > 0:
-                    disk_pct = (used / total) * 100
-                used_gb = used / (1024 ** 3)
-                total_gb = total / (1024 ** 3)
-                disk_text = f"DISK {int(disk_pct)}% {used_gb:.1f}GB / {total_gb:.0f}GB"
-            except Exception: pass
-
-            # Battery percentage and text
-            bat_pct = 0.0
-            bat_text = "BAT N/A"
-            try:
-                lang_is_tr = T("fan") == "Performans" or "tr" in os.getenv("LANG", "").lower()
-                bat_paths = glob.glob("/sys/class/power_supply/BAT*")
-                if bat_paths:
-                    bp = bat_paths[0]
-                    cap_p = f"{bp}/capacity"
-                    status_p = f"{bp}/status"
-                    
-                    pct = 100
-                    if os.path.exists(cap_p):
-                        with open(cap_p) as f:
-                            pct = int(f.read().strip())
-                    
-                    status = "Unknown"
-                    if os.path.exists(status_p):
-                        with open(status_p) as f:
-                            status = f.read().strip()
-                    
-                    bat_pct = float(pct)
-                    
-                    status_tr = {
-                        "Charging": "Şarj Oluyor" if lang_is_tr else "Charging",
-                        "Discharging": "Deşarj Oluyor" if lang_is_tr else "Discharging",
-                        "Full": "Dolu" if lang_is_tr else "Full",
-                        "Not charging": "Şarj Olmuyor" if lang_is_tr else "Not Charging",
-                    }
-                    stat_lbl = status_tr.get(status, status)
-                    bat_text = f"BAT {int(pct)}% ({stat_lbl})"
-                else:
-                    bat_pct = 100.0
-                    bat_text = "BAT 100% (AC)"
-            except Exception: pass
-
-            # Feral GameMode Query
-            gamemode = "Inactive"
-            if shutil.which("gamemoded"):
-                try:
-                    res = subprocess.run(["gamemoded", "-s"], capture_output=True, text=True, timeout=1.0)
-                    out = res.stdout.lower()
-                    if "active" in out:
-                        gamemode = "Active"
-                except Exception: pass
-
-            # Query all real-time sensor diagnostics
-            sensors = self._get_all_sensors()
-
-            # Query physical hp-wmi cTGP & PPAB states
-            gpu_tgp_state = False
-            gpu_ppab_state = False
-            try:
-                for base in ("/sys/devices/platform/hp-wmi", "/sys/devices/platform/hp-omen"):
-                    tgp_p = f"{base}/gpu_tgp"
-                    ppab_p = f"{base}/gpu_ppab"
-                    if os.path.exists(tgp_p):
-                        with open(tgp_p) as f:
-                            gpu_tgp_state = f.read().strip() == "1"
-                    if os.path.exists(ppab_p):
-                        with open(ppab_p) as f:
-                            gpu_ppab_state = f.read().strip() == "1"
-            except Exception: pass
-
-            # Fallbacks for temperatures
-            if not c:
-                try:
-                    for path in glob.glob("/sys/class/thermal/thermal_zone*/temp"):
-                        with open(path) as f:
-                            c = int(f.read().strip()) / 1000
-                            break
-                except Exception: c = 42.0
-            if not g: g = 0.0
-
-            # Conflict checking
-            self._conflict_counter += 1
-            if self._conflict_counter >= 8:
-                self._conflict_counter = 0
-                self._conflict_cache = None
-                for tool in ("tlp", "auto-cpufreq"):
-                    try:
-                        res = subprocess.run(["systemctl", "is-active", f"{tool}.service"],
-                                             capture_output=True, text=True, timeout=1.5)
-                        if res.stdout.strip() == "active":
-                            self._conflict_cache = tool
-                            break
-                    except Exception: pass
-
-            with self.lock:
-                self.data["cpu_temp"] = c
-                self.data["gpu_temp"] = g
-                self.data["cpu_pct"] = cpu_pct
-                self.data["gpu_pct"] = gpu_pct
-                self.data["cpu_freq"] = cpu_freq
-                self.data["gpu_freq"] = gpu_freq
-                self.data["ram_pct"] = ram_pct
-                self.data["ram_text"] = ram_text
-                self.data["disk_pct"] = disk_pct
-                self.data["disk_text"] = disk_text
-                self.data["bat_pct"] = bat_pct
-                self.data["bat_text"] = bat_text
-                self.data["fan_info"] = fi
-                self.data["power_profile"] = pp
-                self.data["rgb_state"] = rg
-                self.data["power_conflict"] = self._conflict_cache
-                self.data["gamemode"] = gamemode
-                self.data["all_sensors"] = sensors
-                self.data["gpu_tgp_state"] = gpu_tgp_state
-                self.data["gpu_ppab_state"] = gpu_ppab_state
-
-            time.sleep(2.0)
-
-    def _get_all_sensors(self):
-        sensors = []
-        try:
-            for d in sorted(os.listdir("/sys/class/hwmon")):
-                path = os.path.join("/sys/class/hwmon", d)
-                name = "unknown"
-                try:
-                    with open(os.path.join(path, "name")) as f:
-                        name = f.read().strip()
-                except Exception: continue
-
-                for tf in sorted(glob.glob(os.path.join(path, "temp*_input"))):
-                    try:
-                        with open(tf) as f:
-                            temp = int(f.read().strip()) / 1000
-                        label_file = tf.replace("_input", "_label")
-                        try:
-                            with open(label_file) as f:
-                                label = f.read().strip()
-                        except Exception:
-                            label = os.path.basename(tf).replace("_input", "")
-                        
-                        if label.lower() == "package id 0":
-                            label = "CPU Package"
-                        elif label.lower().startswith("core "):
-                            try:
-                                core_num = int(label.split()[1])
-                                label = f"Core {core_num + 1}"
-                            except ValueError: pass
-                        elif label.lower() == "tctl":
-                            label = "CPU (tctl)"
-                        elif label.lower() == "tdie":
-                            label = "CPU (tdie)"
-                            
-                        sensors.append({"driver": name, "label": label, "temp": temp})
-                    except Exception: pass
-        except Exception: pass
-        return sensors
-
-    def get_data(self):
-        with self.lock:
-            return self.data.copy()
-
-    def stop(self):
-        self.running = False
-        self._active_event.set()
-
-# ═════════════════════════════════════════════════════════════════════════════
-#  PERFORMANCE & FAN PAGE MAIN COMPONENT
-# ═════════════════════════════════════════════════════════════════════════════
-
 class FanPage(Gtk.Box):
     def __init__(self, service=None, on_profile_change=None):
         super().__init__()
@@ -713,10 +82,10 @@ class FanPage(Gtk.Box):
         self._pending_power_started = 0.0
         self._sensor_labels = {}
         self.is_dark = True
-        self.fan_control_level = 1
-        self.fan_control_mode = "performance"
-        self.fan_curve_editor_open = False
+        self.fan_control_level = 0
+        self.fan_control_mode = "auto"
         self._fan_mode_synced = False
+        self.fan_curve_editor_open = False
 
         self._css_provider = Gtk.CssProvider()
         Gtk.StyleContext.add_provider_for_display(
@@ -765,9 +134,6 @@ class FanPage(Gtk.Box):
             act_btn_color = "#ffffff"
             act_btn_hover_bg = "rgba(255, 255, 255, 0.08)"
             sensor_row_border = "rgba(255, 255, 255, 0.02)"
-            chip_bg = "rgba(255, 255, 255, 0.03)"
-            chip_border = "rgba(255, 255, 255, 0.07)"
-            chip_title_color = "#8890a0"
         else:
             capsule_bg = "rgba(255, 255, 255, 0.85)"
             capsule_border = "rgba(168, 85, 247, 0.25)"
@@ -792,9 +158,6 @@ class FanPage(Gtk.Box):
             act_btn_color = "#0f172a"
             act_btn_hover_bg = "rgba(0, 0, 0, 0.08)"
             sensor_row_border = "rgba(0, 0, 0, 0.04)"
-            chip_bg = "rgba(0, 0, 0, 0.025)"
-            chip_border = "rgba(0, 0, 0, 0.07)"
-            chip_title_color = "#64748b"
 
         css_data = f"""
         .mode-selector-capsule {{
@@ -914,29 +277,9 @@ class FanPage(Gtk.Box):
             border-color: rgba(168, 85, 247, 0.5);
             box-shadow: 0 0 10px rgba(168, 85, 247, 0.25);
         }}
-        .sensor-chip {{
-            background-color: {chip_bg};
-            border: 1px solid {chip_border};
-            border-radius: 12px;
-            padding: 8px 12px;
-            transition: all 150ms ease;
-        }}
-        .sensor-chip-title {{
-            font-size: 9px;
-            font-weight: 700;
-            letter-spacing: 0.8px;
-            text-transform: uppercase;
-            color: {chip_title_color};
-        }}
-        .sensor-chip-val {{
-            font-size: 16px;
-            font-weight: 800;
-        }}
-        .alert-banner {{
-            background-color: rgba(239, 91, 74, 0.12);
-            border: 1px solid rgba(239, 91, 74, 0.3);
-            border-radius: 12px;
-            padding: 8px 16px;
+        .sensor-row {{
+            padding: 4px 6px;
+            border-bottom: 1px solid {sensor_row_border};
         }}
         """
         self._css_provider.load_from_data(css_data.encode())
@@ -1157,6 +500,20 @@ class FanPage(Gtk.Box):
         content.set_margin_end(24)
         content.set_margin_bottom(20)
         self._content_box = content
+        
+        # Fan Control Status Box (Top Right)
+        top_bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
+        top_bar.set_halign(Gtk.Align.END)
+        self.fc_status_badge = Gtk.Box(valign=Gtk.Align.CENTER)
+        self.fc_status_badge.add_css_class("osd")
+        self.fc_status_lbl = Gtk.Label(label="Fan Control: Checking...", css_classes=["caption", "accent"])
+        self.fc_status_lbl.set_margin_start(10)
+        self.fc_status_lbl.set_margin_end(10)
+        self.fc_status_lbl.set_margin_top(2)
+        self.fc_status_lbl.set_margin_bottom(2)
+        self.fc_status_badge.append(self.fc_status_lbl)
+        top_bar.append(self.fc_status_badge)
+        content.append(top_bar)
 
         # ─── 1. DYNAMIC CENTERED SPEEDOMETER GAUGES & COMPACT RAM BRIDGE ───
         gauges_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=32, halign=Gtk.Align.CENTER)
@@ -1299,12 +656,6 @@ class FanPage(Gtk.Box):
         self._pp_conflict_lbl.set_visible(False)
         content.append(self._pp_conflict_lbl)
 
-        # App Profile lock banner
-        self._app_profile_banner = Gtk.Label(label="", use_markup=True, xalign=0.5)
-        self._app_profile_banner.add_css_class("warning-label")
-        self._app_profile_banner.set_visible(False)
-        content.append(self._app_profile_banner)
-
         # ─── 3. OVAL DASHBOARD GRIDS ───
         self.dashboard_grid = Gtk.Grid(column_spacing=18, row_spacing=18)
         self.dashboard_grid.set_column_homogeneous(True)
@@ -1319,11 +670,10 @@ class FanPage(Gtk.Box):
         self.sensor_card.append(lbl_s)
         self.sensor_card.append(Gtk.Separator())
 
-        # Scrollable sensor list (2-column chip grid)
+        # Scrollable sensor list
         sensor_scroll = Gtk.ScrolledWindow(height_request=150, vexpand=True)
         sensor_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        self.sensor_list_box = Gtk.Grid(column_spacing=10, row_spacing=10, hexpand=True)
-        self.sensor_list_box.set_column_homogeneous(True)
+        self.sensor_list_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
         sensor_scroll.set_child(self.sensor_list_box)
         self.sensor_card.append(sensor_scroll)
         
@@ -1369,7 +719,7 @@ class FanPage(Gtk.Box):
         # 3. PPAB Toggle Row
         ppab_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
         ppab_row.set_valign(Gtk.Align.CENTER)
-        ppab_row.append(Gtk.Image.new_from_icon_name("cpu-symbolic"))
+        ppab_row.append(Gtk.Image.new_from_icon_name("processor-symbolic"))
         ppab_row.append(Gtk.Label(label="PPAB Dynamic Boost", xalign=0, css_classes=["dim-label"]))
         ppab_row.append(Gtk.Label(hexpand=True))
         self.ppab_status_label = Gtk.Label(label=T("inactive"))
@@ -1443,10 +793,10 @@ class FanPage(Gtk.Box):
             "ram": "Bellek" if lang_is_tr else "Memory",
         }
         icons = {
-            "cpu": "cpu-symbolic",
+            "cpu": "processor-symbolic",
             "disk": "drive-harddisk-symbolic",
             "gpu": "video-display-symbolic",
-            "ram": "memory-symbolic",
+            "ram": "media-memory-symbolic",
         }
 
         for key in ("cpu", "gpu", "ram", "disk"):
@@ -1478,6 +828,7 @@ class FanPage(Gtk.Box):
         
         self.default_points = [(48, 0), (58, 35), (70, 60), (78, 72), (85, 100)]
         self.performance_points = [(35, 0), (50, 45), (65, 70), (75, 90), (82, 100)]
+        self.auto_points = [(40, 0), (55, 30), (65, 45), (75, 65), (85, 100)]
         self.custom_points = list(self.default_points)
 
         # Set default active state
@@ -1558,8 +909,6 @@ class FanPage(Gtk.Box):
                 self.fan_control_custom_btn.remove_css_class("active")
 
     def _open_custom_curve_editor(self):
-        self._pre_override_fan_mode = None
-        self._pre_override_fan_level = None
         self.fan_control_mode = "custom"
         self.fan_control_level = 3
         self._sync_fan_control_buttons(self.fan_control_level)
@@ -1629,14 +978,12 @@ class FanPage(Gtk.Box):
         return points[-1][1]
 
     def _apply_fan_control_level(self, level):
-        self._pre_override_fan_mode = None
-        self._pre_override_fan_level = None
         level = max(0, min(2, int(level)))
         self.fan_control_level = level
 
         fan_modes = {
             0: ("auto", None),
-            1: ("custom", None),
+            1: ("performance", None),
             2: ("max", None),   # Max mode is handled entirely by driver/BIOS
         }
         fan_mode, fan_pct = fan_modes.get(level, ("auto", None))
@@ -1663,7 +1010,7 @@ class FanPage(Gtk.Box):
                             target_rpm = int(max_rpm * fan_pct / 100)
                             _dbus_call(self.service.SetFanTarget, int(str(fn)), target_rpm)
                     elif level == 1:
-                        self._set_daemon_fan_mode("custom")
+                        self._set_daemon_fan_mode("performance")
                         self._apply_fan_curve(points=self.performance_points)
             except Exception as e:
                 print(f"Fan control preset error: {e}")
@@ -1813,7 +1160,15 @@ class FanPage(Gtk.Box):
             effective_temp = avg_temp
             self.last_applied_temp = avg_temp
 
-        active_points = points or (self.performance_points if self.fan_control_mode == "performance" else self.custom_points)
+        if points:
+            active_points = points
+        elif self.fan_control_mode == "performance":
+            active_points = self.performance_points
+        elif self.fan_control_mode == "auto":
+            active_points = getattr(self, "auto_points", [(40, 0), (55, 30), (65, 45), (75, 65), (85, 100)])
+        else:
+            active_points = self.custom_points
+
         rpm_floor = 2000 if self.fan_control_mode == "performance" else None
         fan_max = None
 
@@ -1826,9 +1181,15 @@ class FanPage(Gtk.Box):
                 if not info.get("available", False):
                     return
                     
-                # Only set mode if it's not already custom
-                if info.get("mode", "") != "custom":
-                    self._set_daemon_fan_mode("custom")
+                # Ensure daemon is in the correct curve-based mode
+                # For software fan curves, the daemon must be in 'custom' or 'performance' (pwm1_enable=1)
+                expected_mode = self.fan_control_mode
+                if expected_mode == "auto":
+                    expected_mode = "custom" # Force daemon to manual mode so we can write targets
+
+                current_mode = info.get("mode", "")
+                if current_mode != expected_mode:
+                    self._set_daemon_fan_mode(expected_mode)
                     
                 fans = info.get("fans", {})
 
@@ -1840,16 +1201,36 @@ class FanPage(Gtk.Box):
                     fan_max = max_rpm
                     fan_pct = self._curve_fan_pct_for_temp(active_points, effective_temp, rpm_floor=rpm_floor, fan_max=fan_max)
 
-                    target_rpm = int(max_rpm * fan_pct / 100)
+                    ideal_target_rpm = int(max_rpm * fan_pct / 100)
+                    
+                    # Anti-Stall Protection: Prevent fan from pulsing at unspinnable low RPMs
+                    MIN_SPIN_RPM = 2000
+                    if 0 < ideal_target_rpm < MIN_SPIN_RPM:
+                        ideal_target_rpm = MIN_SPIN_RPM
+                        
                     last = self.last_applied_rpm.get(str(fn), -1)
-                    # Increased deadband threshold to 400 RPM to filter small jitter commands
-                    if last >= 0 and abs(target_rpm - last) < 400:
+                    
+                    if last < 0:
+                        # Initial state, set directly
+                        target_rpm = ideal_target_rpm
+                    else:
+                        # Smooth transition (step by max 150 RPM per 1.5s tick)
+                        STEP_SIZE = 150
+                        if ideal_target_rpm > last + STEP_SIZE:
+                            target_rpm = last + STEP_SIZE
+                        elif ideal_target_rpm < last - STEP_SIZE:
+                            target_rpm = last - STEP_SIZE
+                        else:
+                            target_rpm = ideal_target_rpm
+                            
+                    # Deadband threshold to filter small jitter
+                    if last >= 0 and abs(target_rpm - last) < 50:
                         continue
 
                     self.last_applied_rpm[str(fn)] = target_rpm
                     
                     def _apply_async(fidx, rpm):
-                        try: self.service.SetFanTarget(fidx, rpm)
+                        try: _dbus_call(self.service.SetFanTarget, fidx, rpm)
                         except: pass
                     threading.Thread(target=_apply_async, args=(int(str(fn)), target_rpm), daemon=True).start()
             except Exception as e:
@@ -1875,6 +1256,48 @@ class FanPage(Gtk.Box):
         sensors = data.get("all_sensors", [])
         gpu_tgp_state = data.get("gpu_tgp_state", False)
         gpu_ppab_state = data.get("gpu_ppab_state", False)
+
+        # Update Fan Control Status Box
+        if fan_info.get("available", False):
+            self.fc_status_lbl.set_label(T("fan_active") if "fan_active" in globals() else "Fan Control: Active")
+            self.fc_status_lbl.set_css_classes(["caption", "success"])
+        else:
+            self.fc_status_lbl.set_label(T("fan_inactive") if "fan_inactive" in globals() else "Fan Control: Inactive")
+            self.fc_status_lbl.set_css_classes(["caption", "error"])
+
+        # On first refresh, sync fan control mode from daemon's actual state
+        if not self._fan_mode_synced and fan_info:
+            daemon_mode = fan_info.get("mode", "auto")
+            if daemon_mode == "auto":
+                self.fan_control_level = 0
+                self.fan_control_mode = "auto"
+                self._sync_fan_control_buttons(0)
+                self._set_custom_button_active(False)
+            elif daemon_mode == "max":
+                self.fan_control_level = 2
+                self.fan_control_mode = "max"
+                self._sync_fan_control_buttons(2)
+                self._set_custom_button_active(False)
+            elif daemon_mode == "custom":
+                saved_curve_json = fan_info.get("custom_curve", "[]")
+                try:
+                    import json as _json
+                    saved_curve = _json.loads(saved_curve_json)
+                    if saved_curve and len(saved_curve) > 0:
+                        self.custom_points = [(p[0], p[1]) for p in saved_curve]
+                except Exception:
+                    pass
+                self.fan_control_level = 3
+                self.fan_control_mode = "custom"
+                self._sync_fan_control_buttons(3)
+                self._set_custom_button_active(True)
+            elif daemon_mode == "performance":
+                self.fan_control_level = 1
+                self.fan_control_mode = "performance"
+                self._sync_fan_control_buttons(1)
+                self._set_custom_button_active(False)
+            self._fan_mode_synced = True
+            print(f"Fan mode synced from daemon: {daemon_mode} (level={self.fan_control_level})")
 
         if not getattr(self, "_custom_curve_loaded", False):
             saved_curve_json = fan_info.get("custom_curve", "[]")
@@ -1915,57 +1338,8 @@ class FanPage(Gtk.Box):
         self.disk_bridge.set_val(disk_pct, disk_text)
         self.bat_bridge.set_val(bat_pct, bat_text)
 
-        # On first refresh, sync fan control mode from daemon's actual state
-        if not getattr(self, "_fan_mode_synced", False) and fan_info:
-            self._fan_mode_synced = True
-            daemon_mode = fan_info.get("mode", "auto")
-            supports_custom = fan_info.get("supports_custom", True)
-            if not supports_custom and getattr(self, "fan_control_custom_btn", None) is not None:
-                self.fan_control_custom_btn.set_visible(False)
-            
-            if daemon_mode == "auto":
-                self.fan_control_mode = "auto"
-                self.fan_control_level = 0
-            elif daemon_mode == "max":
-                self.fan_control_mode = "max"
-                self.fan_control_level = 2
-            elif daemon_mode == "custom":
-                self.fan_control_mode = "custom"
-                self.fan_control_level = 3
-
-        # Sync fan control mode and level with daemon if it was overridden by app profile/daemon
-        daemon_mode = fan_info.get("mode", "auto")
-        if daemon_mode == "auto" and self.fan_control_mode != "auto":
-            if not getattr(self, "_pre_override_fan_mode", None):
-                self._pre_override_fan_mode = self.fan_control_mode
-                self._pre_override_fan_level = self.fan_control_level
-            self.fan_control_mode = "auto"
-            self.fan_control_level = 0
-            self.last_applied_rpm = {}
-            if hasattr(self, "curve_card") and self.curve_card is not None:
-                self.curve_card.set_reveal_child(False)
-        elif daemon_mode == "max" and self.fan_control_mode != "max":
-            if not getattr(self, "_pre_override_fan_mode", None):
-                self._pre_override_fan_mode = self.fan_control_mode
-                self._pre_override_fan_level = self.fan_control_level
-            self.fan_control_mode = "max"
-            self.fan_control_level = 2
-            self.last_applied_rpm = {}
-            if hasattr(self, "curve_card") and self.curve_card is not None:
-                self.curve_card.set_reveal_child(False)
-        elif daemon_mode == "custom" and self.fan_control_mode not in ("custom", "performance"):
-            if getattr(self, "_pre_override_fan_mode", None) in ("custom", "performance"):
-                self.fan_control_mode = self._pre_override_fan_mode
-                self.fan_control_level = self._pre_override_fan_level
-            else:
-                self.fan_control_mode = "custom"
-                self.fan_control_level = 3
-            self._pre_override_fan_mode = None
-            self._pre_override_fan_level = None
-            self.last_applied_rpm = {}
-
         # Apply fan curve if manual custom fan mode is enabled
-        if self.fan_control_mode in ("custom", "performance"):
+        if self.fan_control_mode in ("custom", "performance", "auto"):
             self._apply_fan_curve()
 
         # Rebuild mode selector dynamically matching available WMI/ACPI profiles
@@ -2067,60 +1441,33 @@ class FanPage(Gtk.Box):
 
         # TLP / Auto-cpufreq conflicts
         conflict = data.get("power_conflict")
-        active_app = power_profile.get("active_app")
-        app_profiles_enabled = power_profile.get("app_profiles_enabled", False)
-        app_profile_active = bool(active_app and app_profiles_enabled)
-
-        if app_profile_active:
-            # App profile is overriding — lock profile selector and show banner
-            self.selector_capsule.set_sensitive(False)
-            if hasattr(self, "fan_control_capsule") and self.fan_control_capsule is not None:
-                self.fan_control_capsule.set_sensitive(False)
-            if hasattr(self, "fan_curve") and self.fan_curve is not None:
-                self.fan_curve.set_interactive(False)
-            app_display = str(active_app)
-            banner_text = T("managed_by_app_profile").format(app=app_display)
-            self._app_profile_banner.set_label(
-                f"<span color='#57c494'>{banner_text}</span>")
-            self._app_profile_banner.set_visible(True)
-        else:
-            self._app_profile_banner.set_visible(False)
-            # Only unlock if no TLP conflict either
-            if not conflict:
-                self.selector_capsule.set_sensitive(True)
-                if hasattr(self, "fan_control_capsule") and self.fan_control_capsule is not None:
-                    self.fan_control_capsule.set_sensitive(True)
-                if hasattr(self, "fan_curve") and self.fan_curve is not None and getattr(self, "fan_curve_editor_open", False):
-                    self.fan_curve.set_interactive(True)
-
         if conflict:
-            self.selector_capsule.set_sensitive(conflict != "tlp")
+            self.selector_capsule.set_sensitive(True)
             self._pp_conflict_lbl.set_label(
                 f"<span color='#ef5b4a'>{T('power_managed_by').format(tool=conflict.upper())}</span>")
             self._pp_conflict_lbl.set_visible(True)
         else:
-            if not app_profile_active:
-                self.selector_capsule.set_sensitive(True)
-                if hasattr(self, "fan_control_capsule") and self.fan_control_capsule is not None:
-                    self.fan_control_capsule.set_sensitive(True)
-                if hasattr(self, "fan_curve") and self.fan_curve is not None and getattr(self, "fan_curve_editor_open", False):
-                    self.fan_curve.set_interactive(True)
+            self.selector_capsule.set_sensitive(True)
             self._pp_conflict_lbl.set_visible(False)
 
         # Fan service warning
         available = fan_info.get("available", False)
         self.fan_warning.set_visible(not available)
 
+        # Check custom mode support
+        supports_custom = fan_info.get("supports_custom", True)
+        self.fan_control_custom_btn.set_visible(supports_custom)
+
         return True
 
     def _update_sensor_list(self, sensors):
-        """Populate the left bottom card with a beautifully formatted chip grid of real-time temperatures."""
+        """Populate the left bottom card with a beautifully formatted list of real-time temperatures."""
         if len(sensors) != len(self._sensor_labels):
             while child := self.sensor_list_box.get_first_child():
                 self.sensor_list_box.remove(child)
             self._sensor_labels.clear()
 
-        for idx, s in enumerate(sensors):
+        for s in sensors:
             key = f"{s['driver']}_{s['label']}"
             val_str = f"{int(s['temp'])}°C"
 
@@ -2147,26 +1494,31 @@ class FanPage(Gtk.Box):
                 _lbl_name, lbl_temp = self._sensor_labels[key]
                 lbl_temp.set_markup(f"<span color='{color}'><b>{val_str}</b></span>")
             else:
-                chip = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=3, hexpand=True)
-                chip.add_css_class("sensor-chip")
+                row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+                row.add_css_class("sensor-row")
+                
+                bullet = Gtk.Label(label="• ")
+                bullet.set_opacity(0.4)
+                row.append(bullet)
 
-                lbl_name = Gtk.Label(label=s["label"], xalign=0, css_classes=["sensor-chip-title"])
-                chip.append(lbl_name)
+                lbl_name = Gtk.Label(label=s["label"], xalign=0, css_classes=["dim-label"])
+                lbl_name.set_hexpand(True)
+                row.append(lbl_name)
 
-                lbl_temp = Gtk.Label(xalign=0, css_classes=["sensor-chip-val"])
+                lbl_temp = Gtk.Label(xalign=1)
+                lbl_temp.add_css_class("sensor-temp-val")
                 lbl_temp.set_markup(f"<span color='{color}'><b>{val_str}</b></span>")
-                chip.append(lbl_temp)
+                row.append(lbl_temp)
 
-                col = idx % 2
-                row = idx // 2
-                self.sensor_list_box.attach(chip, col, row, 1, 1)
+                self._sensor_list_box_row = row
+                self.sensor_list_box.append(row)
                 self._sensor_labels[key] = (lbl_name, lbl_temp)
 
         if not sensors:
             if not self.sensor_list_box.get_first_child():
                 lbl_empty = Gtk.Label(label=T("no_sensor"), css_classes=["dim-label"])
                 lbl_empty.set_opacity(0.6)
-                self.sensor_list_box.attach(lbl_empty, 0, 0, 2, 1)
+                self.sensor_list_box.append(lbl_empty)
 
     def cleanup(self):
         self._stop_timers()

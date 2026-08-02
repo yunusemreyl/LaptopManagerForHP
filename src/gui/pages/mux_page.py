@@ -7,7 +7,7 @@ import shutil
 import sys
 import gi
 gi.require_version('Gtk', '4.0')
-from gi.repository import Gtk, GLib
+from gi.repository import Gtk, GLib, Gio
 
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -45,6 +45,7 @@ _BACKEND_LABELS = {
     "envycontrol":  "envycontrol",
     "supergfxctl":  "supergfxctl",
     "prime-select": "prime-select",
+    "wmi-native":   "Native WMI Orchestrator",
     "none":         "—",
 }
 
@@ -94,7 +95,7 @@ class MUXPage(Gtk.Box):
 
     # ── UI construction ───────────────────────────────────────────────────────
     def _build_ui(self):
-        dyn_igpu, dyn_dgpu = self._detect_gpus()
+        _dyn_igpu, dyn_dgpu = self._detect_gpus()
 
         title = Gtk.Label(label=T("mux_switch"), xalign=0)
         title.add_css_class("page-title")
@@ -107,22 +108,24 @@ class MUXPage(Gtk.Box):
 
         # GPU info card
         gpu_info = _get_nvidia_info()
+        
+        self.gpu_card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        self.gpu_card.add_css_class("card")
+
+        gpu_header = Gtk.Box(spacing=10)
+        disp_icon = Gio.ThemedIcon.new_from_names(["display-symbolic", "video-display-symbolic", "computer-symbolic"])
+        gpu_header.append(Gtk.Image.new_from_gicon(disp_icon))
+        gpu_header.append(Gtk.Label(label=T("gpu_info"),
+                                    css_classes=["section-title"]))
+        self.gpu_card.append(gpu_header)
+
         if gpu_info["name"]:
-            gpu_card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
-            gpu_card.add_css_class("card")
-
-            gpu_header = Gtk.Box(spacing=10)
-            gpu_header.append(Gtk.Image.new_from_icon_name("video-display-symbolic"))
-            gpu_header.append(Gtk.Label(label=T("gpu_info"),
-                                        css_classes=["section-title"]))
-            gpu_card.append(gpu_header)
-
             name_row = Gtk.Box(spacing=20)
             name_row.append(Gtk.Label(label=T("gpu_card"), hexpand=True,
                                       xalign=0, css_classes=["stat-lbl"]))
             name_row.append(Gtk.Label(label=gpu_info["name"],
                                       xalign=1, css_classes=["stat-big"]))
-            gpu_card.append(name_row)
+            self.gpu_card.append(name_row)
 
             if gpu_info["driver"]:
                 drv_row = Gtk.Box(spacing=20)
@@ -130,16 +133,37 @@ class MUXPage(Gtk.Box):
                                          xalign=0, css_classes=["stat-lbl"]))
                 drv_row.append(Gtk.Label(label=gpu_info["driver"],
                                          xalign=1, css_classes=["stat-big"]))
-                gpu_card.append(drv_row)
+                self.gpu_card.append(drv_row)
 
-            scroll_content.append(gpu_card)
+        # Mode row
+        mode_row = Gtk.Box(spacing=20)
+        mode_row.append(Gtk.Label(label=T("mode"), hexpand=True, xalign=0, css_classes=["stat-lbl"]))
+        self.mode_val = Gtk.Label(label="-", xalign=1, css_classes=["stat-big"])
+        mode_row.append(self.mode_val)
+        self.gpu_card.append(mode_row)
+        
+        # Backend row
+        backend_row = Gtk.Box(spacing=20)
+        backend_row.append(Gtk.Label(label="Backend", hexpand=True, xalign=0, css_classes=["stat-lbl"]))
+        self.backend_val = Gtk.Label(label="-", xalign=1, css_classes=["stat-big"])
+        backend_row.append(self.backend_val)
+        self.gpu_card.append(backend_row)
+
+        # Displays row
+        disp_row = Gtk.Box(spacing=20)
+        disp_row.append(Gtk.Label(label="Bağlı Ekran Çıkışları", hexpand=True, xalign=0, css_classes=["stat-lbl"]))
+        self.displays_val = Gtk.Label(label="-", xalign=1, justify=Gtk.Justification.RIGHT, css_classes=["stat-big"])
+        disp_row.append(self.displays_val)
+        self.gpu_card.append(disp_row)
+
+        scroll_content.append(self.gpu_card)
 
         # Mode selection card
         card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=25)
         card.add_css_class("card")
 
         header = Gtk.Box(spacing=10)
-        header.append(Gtk.Image.new_from_icon_name("video-display-symbolic"))
+        header.append(Gtk.Image.new_from_gicon(disp_icon))
         header.append(Gtk.Label(label=T("gpu_mode"), css_classes=["section-title"]))
         card.append(header)
 
@@ -147,53 +171,7 @@ class MUXPage(Gtk.Box):
                                halign=Gtk.Align.CENTER)
         self.mode_buttons: dict = {}
 
-        # Integrated
-        self.igpu_outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL,
-                                  spacing=10, halign=Gtk.Align.CENTER)
-        igpu_icon = Gtk.Image.new_from_icon_name("battery-symbolic")
-        igpu_icon.set_pixel_size(80)
-        igpu_icon.set_halign(Gtk.Align.CENTER)
-        self._igpu_icon = igpu_icon
-        self.btn_igpu = Gtk.ToggleButton(child=igpu_icon)
-        self.btn_igpu.add_css_class("mux-btn")
-        self.btn_igpu.connect("toggled",
-            lambda w: self._on_mode_select("integrated") if w.get_active() else None)
-        self.igpu_outer.append(self.btn_igpu)
-        self.igpu_outer.append(Gtk.Label(label=T("integrated"),
-                                         css_classes=["stat-big"]))
-        desc = Gtk.Label(label=dyn_igpu)
-        desc.set_justify(Gtk.Justification.CENTER)
-        desc.add_css_class("stat-lbl")
-        self.igpu_outer.append(desc)
-        self.mux_box.append(self.igpu_outer)
-        self.mode_buttons["integrated"] = self.btn_igpu
-        self.mode_buttons["intel"]      = self.btn_igpu
-
-        # Discrete
-        self.dgpu_outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL,
-                                  spacing=10, halign=Gtk.Align.CENTER)
-        dgpu_icon = Gtk.Image.new_from_icon_name("video-display-symbolic")
-        dgpu_icon.set_pixel_size(80)
-        dgpu_icon.set_halign(Gtk.Align.CENTER)
-        self._dgpu_icon = dgpu_icon
-        self.btn_dgpu = Gtk.ToggleButton(child=dgpu_icon)
-        self.btn_dgpu.add_css_class("mux-btn")
-        self.btn_dgpu.set_group(self.btn_igpu)
-        self.btn_dgpu.connect("toggled",
-            lambda w: self._on_mode_select("discrete") if w.get_active() else None)
-        self.dgpu_outer.append(self.btn_dgpu)
-        self.dgpu_outer.append(Gtk.Label(label=T("discrete"),
-                                         css_classes=["stat-big"]))
-        desc2 = Gtk.Label(label=dyn_dgpu)
-        desc2.set_justify(Gtk.Justification.CENTER)
-        desc2.add_css_class("stat-lbl")
-        self.dgpu_outer.append(desc2)
-        self.mux_box.append(self.dgpu_outer)
-        self.mode_buttons["discrete"]  = self.btn_dgpu
-        self.mode_buttons["dedicated"] = self.btn_dgpu
-        self.mode_buttons["nvidia"]    = self.btn_dgpu
-
-        # Hybrid
+        # ── Hybrid (group anchor) ──────────────────────────────────────────────
         self.hybrid_outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL,
                                     spacing=10, halign=Gtk.Align.CENTER)
         hybrid_icon = Gtk.Image.new_from_icon_name("preferences-system-symbolic")
@@ -201,31 +179,49 @@ class MUXPage(Gtk.Box):
         self._hybrid_icon = hybrid_icon
         self.btn_hybrid = Gtk.ToggleButton(child=hybrid_icon)
         self.btn_hybrid.add_css_class("mux-btn")
-        self.btn_hybrid.set_group(self.btn_igpu)
         self.btn_hybrid.connect("toggled",
             lambda w: self._on_mode_select("hybrid") if w.get_active() else None)
         self.hybrid_outer.append(self.btn_hybrid)
         self.hybrid_outer.append(Gtk.Label(label=T("hybrid"),
                                            css_classes=["stat-big"]))
-        desc3 = Gtk.Label(label=T("hybrid_desc"))
-        desc3.set_justify(Gtk.Justification.CENTER)
-        desc3.add_css_class("stat-lbl")
-        self.hybrid_outer.append(desc3)
+        desc_hybrid = Gtk.Label(label=T("hybrid_desc"))
+        desc_hybrid.set_justify(Gtk.Justification.CENTER)
+        desc_hybrid.add_css_class("stat-lbl")
+        self.hybrid_outer.append(desc_hybrid)
         self.mux_box.append(self.hybrid_outer)
         self.mode_buttons["hybrid"]    = self.btn_hybrid
         self.mode_buttons["on-demand"] = self.btn_hybrid
 
+        # ── Discrete ──────────────────────────────────────────────────────────
+        self.dgpu_outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL,
+                                  spacing=10, halign=Gtk.Align.CENTER)
+        dgpu_icon = Gtk.Image.new_from_gicon(disp_icon)
+        dgpu_icon.set_pixel_size(80)
+        dgpu_icon.set_halign(Gtk.Align.CENTER)
+        self._dgpu_icon = dgpu_icon
+        self.btn_dgpu = Gtk.ToggleButton(child=dgpu_icon)
+        self.btn_dgpu.add_css_class("mux-btn")
+        self.btn_dgpu.set_group(self.btn_hybrid)  # Hybrid is group anchor
+        self.btn_dgpu.connect("toggled",
+            lambda w: self._on_mode_select("discrete") if w.get_active() else None)
+        self.dgpu_outer.append(self.btn_dgpu)
+        self.dgpu_outer.append(Gtk.Label(label=T("discrete"),
+                                         css_classes=["stat-big"]))
+        desc_dgpu = Gtk.Label(label=dyn_dgpu)
+        desc_dgpu.set_justify(Gtk.Justification.CENTER)
+        desc_dgpu.add_css_class("stat-lbl")
+        self.dgpu_outer.append(desc_dgpu)
+        self.mux_box.append(self.dgpu_outer)
+        self.mode_buttons["discrete"]  = self.btn_dgpu
+        self.mode_buttons["dedicated"] = self.btn_dgpu
+        self.mode_buttons["nvidia"]    = self.btn_dgpu
+
         card.append(self.mux_box)
 
         self.status_label = Gtk.Label(
-            label=T("gpu_checking"), css_classes=["stat-lbl"],
+            label="", css_classes=["stat-lbl"],
             wrap=True, xalign=0.5)
         card.append(self.status_label)
-
-        self.backend_label = Gtk.Label(label="", css_classes=["stat-lbl"],
-                                       xalign=0.5)
-        self.backend_label.set_opacity(0.8)
-        card.append(self.backend_label)
 
         scroll_content.append(card)
 
@@ -242,7 +238,7 @@ class MUXPage(Gtk.Box):
         self.warn_card.append(warn_row)
         scroll_content.append(self.warn_card)
 
-        # Not available state — with envycontrol installer
+        # Not available state
         self.not_available = Gtk.Box(orientation=Gtk.Orientation.VERTICAL,
                                      spacing=15, halign=Gtk.Align.CENTER)
         self.not_available.add_css_class("warning-box")
@@ -251,42 +247,18 @@ class MUXPage(Gtk.Box):
         ic.set_pixel_size(48)
         self.not_available.append(ic)
         self.not_available.append(
-            Gtk.Label(label=T("mux_not_found"), css_classes=["warning-text"]))
+            Gtk.Label(label="WMI MUX arayüzü bulunamadı", css_classes=["warning-text"]))
         self.not_available.append(
-            Gtk.Label(label=T("mux_install_hint"),
+            Gtk.Label(label="hp-rgb-lighting çekirdek modülü yüklenmemiş veya WMI MUX desteklenmiyor.",
                       css_classes=["warning-sub"], wrap=True))
 
-        # ── envycontrol install card ──
-        install_card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
-        install_card.add_css_class("card")
-        install_card.set_margin_top(10)
-        install_card.set_size_request(420, -1)
-
-        install_header = Gtk.Box(spacing=8, halign=Gtk.Align.CENTER)
-        install_header.append(Gtk.Image.new_from_icon_name("system-software-install-symbolic"))
-        install_header.append(Gtk.Label(label="Install envycontrol",
-                                        css_classes=["section-title"]))
-        install_card.append(install_header)
-
-        install_desc = Gtk.Label(
-            label="envycontrol allows you to switch between Hybrid, Integrated and Discrete GPU modes.\n"
-                  "Install it using your distribution's package manager.",
-            wrap=True, xalign=0.5, css_classes=["stat-lbl"])
-        install_card.append(install_desc)
-
-        self._install_btn = Gtk.Button(label="📖 View Installation Instructions")
-        self._install_btn.add_css_class("suggested-action")
-        self._install_btn.connect("clicked", self._on_open_install_instructions)
-        install_card.append(self._install_btn)
-
-        self.not_available.append(install_card)
         scroll_content.append(self.not_available)
 
         scroll.set_child(scroll_content)
         self.append(scroll)
 
         # Subtle developer signature
-        sig = Gtk.Label(label="developed by CodesRahul96 & yunusemreyl")
+        sig = Gtk.Label(label="developed by yunusemreyl")
         sig.set_opacity(0.18)
         sig.set_halign(Gtk.Align.END)
         sig.set_margin_end(8)
@@ -323,12 +295,12 @@ class MUXPage(Gtk.Box):
         self.mux_box.set_spacing(12 if bucket == "compact" else 26 if bucket == "spacious" else 20)
 
         icon_size = 64 if bucket == "compact" else 92 if bucket == "spacious" else 80
-        for icon in (getattr(self, "_igpu_icon", None), getattr(self, "_dgpu_icon", None), getattr(self, "_hybrid_icon", None)):
+        for icon in (getattr(self, "_dgpu_icon", None), getattr(self, "_hybrid_icon", None)):
             if icon is not None:
                 icon.set_pixel_size(icon_size)
 
         btn_size = 72 if bucket == "compact" else 96 if bucket == "spacious" else 84
-        for mode in ("integrated", "discrete", "hybrid"):
+        for mode in ("discrete", "hybrid"):
             btn = self.mode_buttons.get(mode)
             if btn is not None:
                 btn.set_size_request(btn_size, btn_size)
@@ -398,7 +370,6 @@ class MUXPage(Gtk.Box):
             "hybrid":     "hybrid",    "on-demand":  "hybrid",
             "discrete":   "discrete",  "dedicated":  "discrete",
             "nvidia":     "discrete",
-            "integrated": "integrated","intel":      "integrated",
         }
         mapped = mode_map.get(self.current_mode, self.current_mode)
         if mapped in self.mode_buttons:
@@ -414,19 +385,6 @@ class MUXPage(Gtk.Box):
                     f"{T('mode_set').format(mode=self.current_mode)} "
                     f"({T('error')}: reboot: {e})")
 
-    # ── envycontrol install instructions ──────────────────────────────────────
-    _ENVYCONTROL_URL = "https://github.com/bayasdev/envycontrol#%EF%B8%8F-getting-envycontrol"
-
-    def _on_open_install_instructions(self, _btn):
-        """Open the envycontrol installation instructions in the default browser."""
-        try:
-            subprocess.Popen(
-                ["xdg-open", self._ENVYCONTROL_URL],
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-            )
-        except Exception:
-            pass
-
     # ── Data refresh ──────────────────────────────────────────────────────────
     def _refresh(self):
         if not self.service:
@@ -440,26 +398,31 @@ class MUXPage(Gtk.Box):
             if available:
                 self.not_available.set_visible(False)
                 self.mux_box.set_visible(True)
-                self.backend_label.set_label(
-                    f"{T('mode')}: {self.current_mode}")
+                self.mode_val.set_label(self.current_mode.capitalize())
+                self.backend_val.set_label(_BACKEND_LABELS.get(self.backend, self.backend))
 
                 mode_map = {
                     "hybrid":     "hybrid",    "on-demand":  "hybrid",
                     "discrete":   "discrete",  "dedicated":  "discrete",
                     "nvidia":     "discrete",
-                    "integrated": "integrated","intel":      "integrated",
                 }
                 mapped = mode_map.get(self.current_mode, self.current_mode)
                 if mapped in self.mode_buttons:
-                    self._mode_loaded = False # prevent trigger during select
+                    self._mode_loaded = False
                     self.mode_buttons[mapped].set_active(True)
                     self._mode_loaded = True
-                
-                self.status_label.set_label(
-                    f"Backend: {_BACKEND_LABELS.get(self.backend, self.backend)}")
+
+                displays = info.get("displays", [])
+                if displays:
+                    disp_texts = [f"{d['display']} → {d['gpu']}" for d in displays]
+                    self.displays_val.set_label("\n".join(disp_texts))
+                else:
+                    self.displays_val.set_label("Yok")
             else:
                 self.not_available.set_visible(True)
                 self.mux_box.set_visible(False)
                 self.status_label.set_label(T("mux_not_found"))
+                if hasattr(self, 'displays_val'):
+                    self.displays_val.set_label("")
         except Exception:
             pass

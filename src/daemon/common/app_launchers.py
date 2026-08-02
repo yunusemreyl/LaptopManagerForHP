@@ -1,3 +1,7 @@
+"""
+OMEN Command Center for Linux — Application Launchers Utility.
+Contributed by CodesRahul96
+"""
 import re
 import os
 

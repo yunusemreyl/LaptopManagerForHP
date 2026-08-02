@@ -101,6 +101,12 @@ class FanController:
                     continue
         self.found_fans.sort()
         self.fan_count = len(self.found_fans)
+        
+        if self.fan_count == 0 and sysfs_exists(os.path.join(self.hwmon_path, "pwm1_enable")):
+            logger.info("WMI mode control found but no fan nodes exposed by kernel. Populating placeholder fans for GUI.")
+            self.found_fans = [1, 2]
+            self.fan_count = 2
+            self.max_speeds = {1: 6000, 2: 6000}
 
     def _find_fallback_path(self, fan_num):
         for path in glob.glob("/sys/class/hwmon/hwmon*/fan*_input"):
@@ -121,15 +127,32 @@ class FanController:
             return
         for i in self.found_fans:
             max_path = os.path.join(self.hwmon_path, f"fan{i}_max")
-            self.max_speeds[i] = sysfs_read(max_path, 6000)
+            raw = sysfs_read(max_path, 0)
+            if raw >= 3000:
+                self.max_speeds[i] = raw
+            else:
+                input_path = os.path.join(self.hwmon_path, f"fan{i}_input")
+                current = sysfs_read(input_path, 0)
+                # Add a 25 % safety headroom; floor at 6000 RPM.
+                self.max_speeds[i] = max(int(current * 1.25), 6000)
+                logger.info(
+                    "Fan %d: hwmon fan_max=%d unreliable (BIOS ref); "
+                    "using dynamic max=%d RPM (from current=%d RPM)",
+                    i, raw, self.max_speeds[i], current,
+                )
 
     def _read_current_mode(self):
         if not self.hwmon_path:
             return
         pwm_path = os.path.join(self.hwmon_path, "pwm1_enable")
         val = sysfs_read(pwm_path, 2)
+        has_pwm = sysfs_exists(os.path.join(self.hwmon_path, "pwm1"))
         if val == 0:
-            self.mode = "max"
+            # Only treat as "max" if pwm1 exists — boards without pwm1
+            # (e.g. 8934/88F8) may report 0 as a firmware default, not max.
+            if has_pwm:
+                self.mode = "max"
+            # Otherwise leave self.mode unchanged (keeps last set mode)
             return
         if val == 1:
             self.mode = "custom"
@@ -139,10 +162,23 @@ class FanController:
         self.mode = "auto"
 
     def supports_custom_mode(self):
+        """Return True if this board can run a custom fan curve.
+
+        Accepts three sources:
+        1. hwmon fan1_target or pwm1 present (kernel-level control)
+        2. EC access already established (ec_sys loaded)
+        3. Capability DB says EC fan control is supported — ec_sys may be
+           loaded later on demand, so we optimistically report True here.
+        """
         if self.hwmon_path:
             if sysfs_exists(os.path.join(self.hwmon_path, "fan1_target")) or sysfs_exists(os.path.join(self.hwmon_path, "pwm1")):
                 return True
         if self.ec.has_ec_access and not self.ec.is_unsafe_ec_model:
+            return True
+        # EC capable but ec_sys not yet loaded — still advertise support so
+        # the GUI shows the custom curve UI.  The controller will attempt to
+        # load ec_sys when the first target write arrives.
+        if self.ec.capabilities.supports_fan_control_ec and not self.ec.is_unsafe_ec_model:
             return True
         return False
 
@@ -166,6 +202,15 @@ class FanController:
         speed = self._hwmon_read(f"fan{fan_num}_input")
         if speed == 0:
             speed = self._try_fan_speed_fallback(fan_num)
+            
+        current_max = self.max_speeds.get(fan_num, 0)
+        # Dynamically update max_speed if the fan spins much faster than the BIOS reference max
+        if speed > current_max and speed > 3000:
+            # Round up slightly for headroom
+            new_max = max(int(speed * 1.05), 6000)
+            self.max_speeds[fan_num] = new_max
+            logger.info("Fan %d exceeded known max speed (%d). Updating max to %d", fan_num, speed, new_max)
+            
         return speed
 
     def _try_fan_speed_fallback(self, fan_num):
@@ -190,9 +235,16 @@ class FanController:
     # ── write ─────────────────────────────────────────────────────────
 
     def set_mode(self, mode):
-        val = {"auto": 2, "max": 0, "custom": 1}.get(mode)
+        val = {"auto": 2, "max": 0, "custom": 1, "performance": 1}.get(mode)
         if val is None:
             return False
+
+        if mode == "auto" and self.hwmon_path:
+            logger.info("Clearing fan targets before switching to auto mode")
+            for i in self.found_fans:
+                t_path = os.path.join(self.hwmon_path, f"fan{i}_target")
+                if sysfs_exists(t_path):
+                    sysfs_write(t_path, 0)
 
         ok = False
         if self.hwmon_path:
@@ -204,8 +256,8 @@ class FanController:
             logger.info("pwm1_enable write failed for custom, falling back to direct pwm1 write availability")
             ok = True
 
-        if not ok and mode == "max":
-            logger.info("pwm1_enable write failed for max, trying platform profile fallback")
+        if mode == "max":
+            logger.info("Syncing platform profile for max mode")
             for profile_path, profile_value in (
                 ("/sys/devices/platform/hp-wmi/thermal_profile", "1"),
                 ("/sys/devices/platform/hp-omen/thermal_profile", "1"),
@@ -224,8 +276,8 @@ class FanController:
                 if sysfs_write(os.path.join(self.hwmon_path, "pwm1"), 255):
                     ok = True
 
-        if not ok and mode == "auto":
-            logger.info("pwm1_enable write failed for auto, trying platform profile fallback")
+        if mode == "auto":
+            logger.info("Syncing platform profile for auto mode")
             for profile_path, profile_value in (
                 ("/sys/devices/platform/hp-wmi/thermal_profile", "0"),
                 ("/sys/devices/platform/hp-omen/thermal_profile", "0"),
@@ -244,10 +296,11 @@ class FanController:
                 if sysfs_write(os.path.join(self.hwmon_path, "pwm1"), 0):
                     ok = True
 
-        if not ok and self.ec.has_ec_access and not self.ec.is_unsafe_ec_model:
-            logger.info("Using direct EC write for mode %s fallback", mode)
-            if self.ec.set_perf_mode(mode):
-                ok = True
+        if not ok and self.ec.has_ec_access:
+            if not self.ec.is_unsafe_ec_model or self.ec.needs_ec_fallback:
+                logger.info("Using direct EC write for mode %s fallback", mode)
+                if self.ec.set_perf_mode(mode):
+                    ok = True
 
         if ok:
             self.mode = mode
@@ -276,18 +329,17 @@ class FanController:
             return True
 
         path = os.path.join(self.hwmon_path, f"fan{fan_num}_target") if self.hwmon_path else None
+
+                    
+        # 2. Öncelik: Hwmon fan_target (EC çalışmazsa veya yoksa)
         if path and sysfs_exists(path):
             ok = sysfs_write(path, rpm)
+        # 3. Öncelik: Hwmon pwm1
         elif self._has_pwm_fallback():
             ok = self._set_pwm_fallback_target(fan_num, rpm)
-        elif self.ec.has_ec_access and not self.ec.is_unsafe_ec_model:
-            max_rpm = self.get_max_speed(fan_num)
-            pct = int(round(rpm * 100.0 / max_rpm))
-            logger.info("Using direct EC write for fan %d target (%d%%)", fan_num, pct)
-            ok = self.ec.set_fan_speed_pct(fan_num, pct)
         else:
             logger.debug(
-                "No fan%d_target, pwm1 fallback, or EC access available",
+                "No EC access, no fan%d_target, and no pwm1 fallback available",
                 fan_num,
             )
             return False
@@ -323,7 +375,9 @@ class FanController:
         return sysfs_write(os.path.join(self.hwmon_path, "pwm1"), pwm)
 
     def is_available(self):
-        return (self.hwmon_path is not None and self.fan_count > 0) or self.ec.has_ec_access
+        has_wmi_mode = self.hwmon_path is not None and sysfs_exists(os.path.join(self.hwmon_path, "pwm1_enable"))
+        has_profile = sysfs_exists("/sys/firmware/acpi/platform_profile") or sysfs_exists("/sys/devices/platform/hp-wmi/platform_profile")
+        return (self.hwmon_path is not None and self.fan_count > 0) or self.ec.has_ec_access or has_wmi_mode or has_profile
 
     def get_mode(self):
         if self.hwmon_path:
@@ -375,6 +429,7 @@ class FanService:
     <node>
       <interface name="com.yyl.hpmanager.fan">
         <method name="SetFanMode"><arg type="s" name="mode" direction="in"/><arg type="s" name="resp" direction="out"/></method>
+        <method name="GetFanMode"><arg type="s" name="mode" direction="out"/></method>
         <method name="SetFanTarget"><arg type="i" name="fan" direction="in"/><arg type="i" name="rpm" direction="in"/><arg type="s" name="resp" direction="out"/></method>
         <method name="GetFanInfo"><arg type="s" name="j" direction="out"/></method>
         <method name="SaveCustomCurve"><arg type="s" name="curve_json" direction="in"/><arg type="s" name="resp" direction="out"/></method>
@@ -389,7 +444,17 @@ class FanService:
         self._config.load()
 
         self._cache_lock = threading.Lock()
-        self._fan_cache = {}
+        # Pre-populate cache so GetFanInfo never returns {} before the first
+        # monitor loop iteration completes (avoids GUI parse errors on startup).
+        self._fan_cache = {
+            "available": self._fan.is_available(),
+            "fan_count": self._fan.get_fan_count(),
+            "mode": self._config.get("fan_mode", "auto"),
+            "supports_custom": self._fan.supports_custom_mode(),
+            "custom_curve": self._config.get("custom_curve", "[]"),
+            "fans": {},
+            "thermal_protection": False,
+        }
         self._thermal_protection_active = False
         self._thermal_protection_entered_at = 0.0
         self._pre_protection_mode = None
@@ -405,81 +470,47 @@ class FanService:
             return
         saved = self._config.get("fan_mode", "auto")
 
-        if saved in ("auto", "max", "custom"):
+        if saved in ("auto", "max", "custom", "performance"):
             if self._fan.get_mode() != saved:
                 ok = self._fan.set_mode(saved)
                 logger.info("Restored fan mode '%s' (success=%s)", saved, ok)
             else:
                 logger.info("Fan mode already '%s', skipping write", saved)
 
-    # Known CPU/GPU hwmon driver names for targeted temperature reading
-    _CPU_GPU_DRIVERS = frozenset({
-        "coretemp", "k10temp", "zenpower", "cpu_thermal",  # CPU
-        "amdgpu", "nvidia", "nouveau", "radeon",            # GPU
-        "hp", "hp-omen",                                    # HP WMI (reports CPU/GPU)
-    })
-
     def _get_max_temp(self):
-        """Read the highest CPU/GPU temperature.
+        """Read the highest CPU/GPU temperature using the standard hwmon controller.
 
-        Prefer sensors from known CPU/GPU drivers to avoid phantom readings
-        from NVMe, VRM, ACPI, or other unrelated hwmon devices.
-        Falls back to all sensors only if no known driver is found.
+        Explicitly excludes the HP WMI hwmon node (driver name \"hp\") from CPU
+        sensing — that driver is primarily for fans/power and its temperature
+        registers routinely return -273\u00b0C (0 Kelvin BIOS phantom).  Real CPU
+        temperature is read from coretemp / k10temp / zenpower instead.
         """
-        cpu_gpu_max = 0.0
-        all_max = 0.0
-        found_known_driver = False
+        if not hasattr(self, '_hwmon'):
+            from common.hwmon_controller import LinuxHwMonController
+            self._hwmon = LinuxHwMonController()
 
-        try:
-            for hwmon_dir in glob.glob("/sys/class/hwmon/hwmon*/"):
-                # Identify the driver name for this hwmon device
-                name_path = os.path.join(hwmon_dir, "name")
-                driver_name = ""
-                try:
-                    with open(name_path) as f:
-                        driver_name = f.read().strip().lower()
-                except Exception:
-                    pass
+        cpu_temp = self._hwmon.get_cpu_temperature() or 0.0
+        gpu_temp = self._hwmon.get_gpu_temperature() or 0.0
 
-                is_known = driver_name in self._CPU_GPU_DRIVERS
-                if is_known:
-                    found_known_driver = True
+        # Sanity-check: hwmon_controller already filters -273\u00b0C but add an
+        # extra guard so a future regression can't trigger thermal protection.
+        if cpu_temp < 0 or cpu_temp > 115.0:
+            cpu_temp = 0.0
+        if gpu_temp < 0 or gpu_temp > 115.0:
+            gpu_temp = 0.0
 
-                for temp_path in glob.glob(os.path.join(hwmon_dir, "temp*_input")):
-                    try:
-                        with open(temp_path) as f:
-                            t = int(f.read().strip()) / 1000.0
-                            if 0 < t < 120:
-                                if is_known and t > cpu_gpu_max:
-                                    cpu_gpu_max = t
-                                if t > all_max:
-                                    all_max = t
-                    except Exception:
-                        pass
-        except Exception:
-            pass
+        # Fallback to EC if both hwmon sensors fail and EC is available
+        if cpu_temp == 0.0 and gpu_temp == 0.0 and self._fan.ec.has_ec_access and not self._fan.ec.is_unsafe_ec_model:
+            ec_cpu = self._fan.ec.get_cpu_temp() or 0.0
+            ec_gpu = self._fan.ec.get_gpu_temp() or 0.0
+            # EC also sometimes returns 0 on boot; only trust values in range
+            if 1.0 <= ec_cpu <= 115.0:
+                cpu_temp = ec_cpu
+            if 1.0 <= ec_gpu <= 115.0:
+                gpu_temp = ec_gpu
 
-        # Prefer CPU/GPU-specific reading; fall back to all sensors
-        if found_known_driver and cpu_gpu_max > 0:
-            return cpu_gpu_max
-
-        if all_max > 0:
-            return all_max
-
-        # Last resort: thermal zones
-        try:
-            for path in glob.glob("/sys/class/thermal/thermal_zone*/temp"):
-                try:
-                    with open(path) as f:
-                        t = int(f.read().strip()) / 1000.0
-                        if 0 < t < 120 and t > all_max:
-                            all_max = t
-                except Exception:
-                    pass
-        except Exception:
-            pass
-
-        return all_max or 45.0
+        max_temp = max(cpu_temp, gpu_temp)
+        return max_temp if max_temp > 0 else 45.0
 
     def _curve_fan_pct(self, points, temp):
         if not points:
@@ -504,16 +535,28 @@ class FanService:
 
             temp = self._get_max_temp()
 
+            fans_stalled = False
+            mode = self._fan.get_mode()
+            if mode != "max" and temp > 75.0:
+                speeds = [self._fan.get_current_speed(i) for i in self._fan.found_fans]
+                if speeds and all(s < 100 for s in speeds):
+                    fans_stalled = True
+
             # Thermal Protection Mode
-            if temp > 95.0 and not self._thermal_protection_active:
-                logger.warning("Temperature exceeded 95°C (%d°C). Activating Thermal Protection Mode (Max Fan).", temp)
+            if (temp > 95.0 or fans_stalled) and not self._thermal_protection_active:
+                if fans_stalled:
+                    logger.critical("FAN STALL DETECTED! Temp is %d°C but fans are at 0 RPM! Activating Protection.", temp)
+                else:
+                    logger.warning("Temperature exceeded 95°C (%d°C). Activating Thermal Protection Mode (Max Fan).", temp)
                 self._thermal_protection_active = True
                 self._thermal_protection_entered_at = time.monotonic()
-                self._pre_protection_mode = self._config.get("fan_mode", self._fan.get_mode())
+                self._pre_protection_mode = self._config.get("fan_mode", mode)
                 self._fan.set_mode("max")
+                
+                reason = "Fanlarınız dış bir müdahale ile durdurulduğu için" if fans_stalled else "Yüksek sıcaklıklardan cihazınızı korumak için"
                 send_desktop_notification(
                     "OmenCtl Koruma Modu",
-                    "Yüksek sıcaklıklardan cihazınızı korumak için max fan modu aktif edildi."
+                    f"{reason} max fan modu aktif edildi."
                 )
             elif self._thermal_protection_active:
                 elapsed = time.monotonic() - self._thermal_protection_entered_at
@@ -541,9 +584,31 @@ class FanService:
                         self._fan.set_mode("max")
 
             mode = self._fan.get_mode()
+
+            # Use the config-stored (user-intended) mode as the authoritative source.
+            # The hardware-reported mode can be reset by power-profiles-daemon or ACPI
+            # events, so we rely on config for deciding whether to apply the curve.
+            config_mode = self._config.get("fan_mode", "auto")
+
+            # Hardware only knows "custom", but we want to expose "performance"
+            # to the UI if it was requested via DBus.
+            if mode == "custom":
+                stored_mode = self._config.get("fan_mode")
+                if stored_mode == "performance":
+                    mode = "performance"
+
+            # Mode enforcement: if the user requested custom/performance but the
+            # hardware was reset to auto/balanced by an external agent, restore it.
+            if config_mode in ("custom", "performance") and not self._thermal_protection_active:
+                hw_mode = mode  # hardware value from get_mode()
+                if hw_mode not in ("custom", "performance"):
+                    logger.debug("Mode enforcement: hardware reported '%s' but config wants '%s'. Re-applying.", hw_mode, config_mode)
+                    self._fan.set_mode("custom")
+                    mode = config_mode
+
             custom_curve_str = self._config.get("custom_curve", "[]")
 
-            if mode == "custom" and not self._thermal_protection_active:
+            if config_mode in ("custom", "performance") and not self._thermal_protection_active:
                 try:
                     curve = json.loads(custom_curve_str)
                     if not curve or len(curve) == 0:
@@ -560,9 +625,9 @@ class FanService:
 
             fans_data = {
                 str(i): {
-                    "current": self._fan.get_current_speed(i),
+                    "current": 0,
                     "max": self._fan.get_max_speed(i),
-                    "target": self._fan.get_target_speed(i),
+                    "target": 0,
                 }
                 for i in self._fan.found_fans
             }
@@ -605,7 +670,21 @@ class FanService:
 
     def GetFanInfo(self):
         with self._cache_lock:
-            return json.dumps(self._fan_cache)
+            snapshot = dict(self._fan_cache)
+            snapshot["fans"] = {k: dict(v) for k, v in snapshot.get("fans", {}).items()}
+            
+        for i in self._fan.found_fans:
+            str_i = str(i)
+            if str_i in snapshot["fans"]:
+                snapshot["fans"][str_i]["current"] = self._fan.get_current_speed(i)
+                snapshot["fans"][str_i]["target"] = self._fan.get_target_speed(i)
+                
+        return json.dumps(snapshot)
+
+    def GetFanMode(self):
+        """Convenience method — returns the current fan mode string."""
+        with self._cache_lock:
+            return self._fan_cache.get("mode", "auto")
 
     def SaveCustomCurve(self, curve_json):
         logger.info("SaveCustomCurve: %s", curve_json)

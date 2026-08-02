@@ -56,7 +56,7 @@ from pages.keyboard_page import KeyboardPage
 from pages.app_profiles_page import AppProfilesPage
 from pages.power_page import PowerPage
 
-APP_VERSION = "1.6.0-preview"
+APP_VERSION = "1.6.6"
 CONFIG_FILE      = os.path.expanduser("~/.config/hp-manager.toml")
 CONFIG_FILE_JSON = os.path.expanduser("~/.config/hp-manager.json")
 _LAUNCHER_REFRESH_MS = 5000
@@ -177,39 +177,22 @@ class FixedMenuIcon(Gtk.DrawingArea):
             return
 
         if kind == "lighting":
-            # Draw a keyboard outline at the bottom
-            x = w * 0.18
-            y = h * 0.45
-            ww = w * 0.64
-            hh = h * 0.35
-            cr.rectangle(x, y, ww, hh)
+            cx, cy = w / 2, h / 2
+            r = min(w, h) * 0.22
+            cr.arc(cx, cy - r * 0.25, r, 0, 2 * 3.14159)
             cr.stroke()
-            # Draw spacebar
-            cr.rectangle(x + ww * 0.25, y + hh * 0.68, ww * 0.5, hh * 0.18)
+            cr.move_to(cx - r * 0.55, cy + r * 0.9)
+            cr.line_to(cx + r * 0.55, cy + r * 0.9)
             cr.stroke()
-            # Some key lines
-            key_w = ww / 5.0
-            key_h = hh / 3.0
-            for r in range(2):
-                for c in range(4):
-                    kx = x + key_w * 0.5 + c * key_w
-                    ky = y + key_h * 0.4 + r * key_h
-                    cr.rectangle(kx, ky, key_w * 0.6, key_h * 0.4)
-                    cr.stroke()
-            
-            # Draw rays of light pointing upwards/outwards from the keyboard
-            cx = w / 2
-            cy = y - h * 0.05
-            r1 = h * 0.1
-            r2 = h * 0.28
-            for angle in (-1.57, -1.05, -2.09, -0.52, -2.62):
-                x1 = cx + r1 * math.cos(angle)
-                y1 = cy + r1 * math.sin(angle)
-                x2 = cx + r2 * math.cos(angle)
-                y2 = cy + r2 * math.sin(angle)
-                cr.move_to(x1, y1)
-                cr.line_to(x2, y2)
-                cr.stroke()
+            cr.move_to(cx - r * 0.34, cy + r * 0.52)
+            cr.line_to(cx + r * 0.34, cy + r * 0.52)
+            cr.stroke()
+            cr.move_to(cx - r * 0.34, cy + r * 0.52)
+            cr.line_to(cx - r * 0.34, cy + r * 0.9)
+            cr.stroke()
+            cr.move_to(cx + r * 0.34, cy + r * 0.52)
+            cr.line_to(cx + r * 0.34, cy + r * 0.9)
+            cr.stroke()
             return
 
         if kind == "keyboard":
@@ -254,6 +237,33 @@ class FixedMenuIcon(Gtk.DrawingArea):
             cr.stroke()
             return
 
+        if kind == "power":
+            cx, cy = w / 2, h / 2
+            r = min(w, h) * 0.25
+            cr.arc(cx, cy, r, 0, 2 * 3.14159)
+            cr.stroke()
+            cr.move_to(cx - r*0.3, cy - r*0.6)
+            cr.line_to(cx + r*0.4, cy + r*0.1)
+            cr.line_to(cx - r*0.1, cy + r*0.1)
+            cr.line_to(cx + r*0.3, cy + r*0.6)
+            cr.stroke()
+            return
+
+        if kind == "app_profiles":
+            cx, cy = w / 2, h / 2
+            r = min(w, h) * 0.26
+            cr.arc(cx, cy, r, 0, 2 * 3.14159)
+            cr.stroke()
+            cr.rectangle(cx - r*0.4, cy - r*0.4, r*0.8, r*0.8)
+            cr.stroke()
+            cr.move_to(cx - r*1.2, cy)
+            cr.line_to(cx - r*0.7, cy)
+            cr.stroke()
+            cr.move_to(cx + r*0.7, cy)
+            cr.line_to(cx + r*1.2, cy)
+            cr.stroke()
+            return
+
         if kind == "settings":
             cx, cy = w / 2, h / 2
             r = min(w, h) * 0.24
@@ -285,14 +295,13 @@ class FixedMenuIcon(Gtk.DrawingArea):
             return
 
 
-class HPManagerWindow(Adw.ApplicationWindow if HAS_ADW else Gtk.ApplicationWindow):
+class HPManagerWindow(Gtk.ApplicationWindow):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.set_title("OmenCtl")
         self.set_default_size(1100, 750)
         self.set_decorated(True)
         self.set_resizable(True)
-
 
         # Register local icon directory with the theme
         display = Gdk.Display.get_default()
@@ -317,10 +326,6 @@ class HPManagerWindow(Adw.ApplicationWindow if HAS_ADW else Gtk.ApplicationWindo
         self._nvidia_runtime_status_scanned = False
         self.performance_mode = "balanced"
         self._ui_scale_bucket = "normal"
-        # App-profile theme override tracking
-        self._app_profile_prev_active = None   # last seen active_app from daemon
-        self._app_profile_saved_theme = None   # user theme before an override
-        self._app_profile_theme_override = False  # suppress _save_config during override
         self._ui_scale_tick_id = 0
         self._ui_last_width = 0
         self._ui_last_height = 0
@@ -336,8 +341,8 @@ class HPManagerWindow(Adw.ApplicationWindow if HAS_ADW else Gtk.ApplicationWindo
             "fan": T("fan"),
             "lighting": T("lighting"),
             "power": T("power_tuning"),
-            "app_profiles": T("app_profiles"),
             "keyboard": T("keyboard"),
+            "app_profiles": T("app_profiles"),
             "mux": "MUX",
             "settings": T("settings"),
         }
@@ -356,16 +361,9 @@ class HPManagerWindow(Adw.ApplicationWindow if HAS_ADW else Gtk.ApplicationWindo
         if HAS_ADW:
             try:
                 sm = Adw.StyleManager.get_default()
-                sm.connect("notify::dark", self._on_system_dark_changed)
+                sm.connect("notify::dark", lambda *_: self._on_system_theme_notify())
             except Exception:
                 pass
-        else:
-            settings = Gtk.Settings.get_default()
-            if settings is not None:
-                try:
-                    settings.connect("notify::gtk-application-prefer-dark-theme", self._on_system_dark_changed)
-                except Exception:
-                    pass
 
     @staticmethod
     def _home_title():
@@ -503,9 +501,6 @@ class HPManagerWindow(Adw.ApplicationWindow if HAS_ADW else Gtk.ApplicationWindo
         return str(val).replace('\\', '\\\\').replace('"', '\\"').replace('\n', '\\n')
 
     def _save_config(self):
-        # Do not persist theme when it was changed by an app-profile auto-override
-        if getattr(self, "_app_profile_theme_override", False):
-            return
         try:
             os.makedirs(os.path.dirname(CONFIG_FILE), exist_ok=True)
             theme     = self._toml_escape(self.app_theme)
@@ -533,15 +528,14 @@ class HPManagerWindow(Adw.ApplicationWindow if HAS_ADW else Gtk.ApplicationWindo
                 sm.set_color_scheme(Adw.ColorScheme.FORCE_LIGHT)
             else:
                 sm.set_color_scheme(Adw.ColorScheme.DEFAULT)
-        else:
-            settings = Gtk.Settings.get_default()
-            if settings is not None:
-                if self.app_theme == "dark":
-                    settings.set_property("gtk-application-prefer-dark-theme", True)
-                elif self.app_theme == "light":
-                    settings.set_property("gtk-application-prefer-dark-theme", False)
-                else:
-                    settings.set_property("gtk-application-prefer-dark-theme", False)
+            return
+
+        settings = Gtk.Settings.get_default()
+        if settings is not None:
+            if self.app_theme == "dark":
+                settings.set_property("gtk-application-prefer-dark-theme", True)
+            elif self.app_theme == "light":
+                settings.set_property("gtk-application-prefer-dark-theme", False)
 
     def _get_system_accent(self):
         """Return the system/GTK accent colour as a hex string."""
@@ -617,33 +611,28 @@ class HPManagerWindow(Adw.ApplicationWindow if HAS_ADW else Gtk.ApplicationWindo
             accent_glow         = f"rgba({ar}, {ag}, {ab}, 0.16)" # Interactive glow
             accent_border_hover = f"rgba({ar}, {ag}, {ab}, 0.48)"
             accent_dark         = self._darken(accent, 60)
-            bg             = "#0e1118"                         # Sleek Charcoal/Slate Blue
-            sidebar_bg     = "#151b26"                         # Solid sidebar base
-            sidebar_bg2    = "#1c2331"                         # Sidebar gradient end
-            card_bg        = "#1b2230"                         # Solid card background for excellent contrast
-            card_border    = "rgba(255, 255, 255, 0.08)"       # Frosted border
-            sep_color      = "rgba(255, 255, 255, 0.08)"       # Separator
+            bg             = "#07080c"                         # Deep Obsidian Black
+            sidebar_bg     = "#0a0b12"                         # Deep sidebar base
+            sidebar_bg2    = "#10111a"                         # Sidebar gradient end
+            card_bg        = "rgba(20, 18, 28, 0.72)"         # Translucent Amethyst Glass
+            card_border    = "rgba(255, 255, 255, 0.07)"       # Frosted border
+            sep_color      = "rgba(168, 85, 247, 0.12)"        # Purple-tinted separator
             fg             = "#ffffff"
-            fg_dim         = "#e2e8f0"                         # Lighter and higher contrast
-            fg_very_dim    = "#a8b2c1"                         # Lighter than 94a3b8
-            input_bg       = "#242e42"
+            fg_dim         = "#cbd5e1"
+            fg_very_dim    = "#94a3b8"
+            input_bg       = "rgba(255, 255, 255, 0.08)"
             clean_ram_color = "inherit"
             launcher_title_color = "#ffffff"
-            launcher_subtitle_color = "#e2e8f0"
+            launcher_subtitle_color = "#94a3b8"
             launcher_metric_main_color = "#f8fafc"
-            launcher_metric_sub_color = "#e2e8f0"
-            launcher_temp_warm_color = "#f1f5f9"
-            launcher_mode_badge_color = "rgba(168, 85, 247, 0.20)"
-            launcher_mode_badge_muted_color = "rgba(255, 255, 255, 0.08)"
-            launcher_dimmed_opacity = 0.65
-            topbar_bg      = "#151b26"
+            launcher_metric_sub_color = "#cbd5e1"
+            launcher_temp_warm_color = "#e2e8f0"
+            launcher_mode_badge_color = "rgba(168, 85, 247, 0.15)"
+            launcher_mode_badge_muted_color = "rgba(255, 255, 255, 0.06)"
+            launcher_dimmed_opacity = 0.55
+            topbar_bg      = "rgba(10, 11, 15, 0.85)"
             topbar_border  = "rgba(255, 255, 255, 0.08)"
-            topbar_shadow  = "rgba(0,0,0,0.4)"
-            entry_bg       = "#242e42"
-            entry_fg       = "#ffffff"
-            entry_border   = "rgba(255, 255, 255, 0.15)"
-            hover_bg       = "rgba(255, 255, 255, 0.06)"
-            hover_border   = "rgba(255, 255, 255, 0.08)"
+            topbar_shadow  = "rgba(0,0,0,0.65)"
         else:
             bg             = "#f3f4f6"                         # Minimalist Porcelain
             sidebar_bg     = "#f8f9fb"                         # Light sidebar base
@@ -667,11 +656,6 @@ class HPManagerWindow(Adw.ApplicationWindow if HAS_ADW else Gtk.ApplicationWindo
             topbar_bg      = "rgba(255, 255, 255, 0.90)"
             topbar_border  = "rgba(0, 0, 0, 0.06)"
             topbar_shadow  = "rgba(0, 0, 0, 0.08)"
-            entry_bg       = "#ffffff"
-            entry_fg       = "#0f172a"
-            entry_border   = "rgba(0, 0, 0, 0.15)"
-            hover_bg       = "rgba(0, 0, 0, 0.05)"
-            hover_border   = "rgba(0, 0, 0, 0.08)"
             
             # Recalculate accent for light mode to maintain contrast
             mode_accent_map_light = {
@@ -763,6 +747,7 @@ class HPManagerWindow(Adw.ApplicationWindow if HAS_ADW else Gtk.ApplicationWindo
             border-right: 1px solid rgba(255, 255, 255, 0.06);
             border-radius: 0px;
             box-shadow: inset -1px 0 0 rgba(255, 255, 255, 0.03);
+            padding: 8px 16px;
             transition: background-color 260ms ease, border-color 260ms ease, box-shadow 260ms ease, opacity 260ms ease;
         }}
         .sidebar-header-area {{
@@ -797,6 +782,7 @@ class HPManagerWindow(Adw.ApplicationWindow if HAS_ADW else Gtk.ApplicationWindo
             font-size: 11px;
             font-weight: 700;
             color: {fg_dim};
+            margin-top: 24px;
             margin-top: 6px;
             padding: 0 4px;
             transition: opacity 180ms ease;
@@ -1051,20 +1037,9 @@ class HPManagerWindow(Adw.ApplicationWindow if HAS_ADW else Gtk.ApplicationWindo
             font-weight: 520;
             transition: color 220ms ease;
         }}
-        entry, entry > text, entry text, entry > text > block, entry > textview, entry > textview > text {{
-            background-color: {entry_bg};
-            border: 1px solid {entry_border};
-            border-radius: 10px;
-            padding: 8px 12px;
-            color: {entry_fg};
-            transition: background-color 220ms ease, color 220ms ease, border-color 220ms ease;
-        }}
-        entry:focus, entry > text:focus, entry text:focus {{
-            border-color: {accent};
-            box-shadow: 0 0 0 2px alpha({accent}, 0.25);
-        }}
-        entry > text > placeholder, entry placeholder {{
-            color: {fg_very_dim};
+        entry {{
+            color: {fg};
+            transition: color 220ms ease;
         }}
         image {{
             color: {fg_dim};
@@ -1187,8 +1162,8 @@ class HPManagerWindow(Adw.ApplicationWindow if HAS_ADW else Gtk.ApplicationWindo
             min-height: 0;
         }}
         .nav-item:hover {{
-            background: {hover_bg};
-            border-color: {hover_border};
+            background: rgba(255, 255, 255, 0.05);
+            border-color: rgba(255, 255, 255, 0.06);
         }}
         .nav-item.active {{
             background: linear-gradient(135deg, rgba({ar}, {ag}, {ab}, 0.14), rgba({ar}, {ag}, {ab}, 0.06));
@@ -2038,7 +2013,7 @@ class HPManagerWindow(Adw.ApplicationWindow if HAS_ADW else Gtk.ApplicationWindo
         bar = Gtk.Box(spacing=6)
         bar.add_css_class("floating-topbar")
 
-        left = Gtk.Box(spacing=6, valign=Gtk.Align.CENTER, hexpand=True)
+        left = Gtk.Box(spacing=6, halign=Gtk.Align.START, valign=Gtk.Align.CENTER)
 
         self.menu_back_btn = Gtk.Button()
         self.menu_back_btn.add_css_class("menu-back-btn")
@@ -2059,13 +2034,14 @@ class HPManagerWindow(Adw.ApplicationWindow if HAS_ADW else Gtk.ApplicationWindo
         else:
             brand_icon.set_from_icon_name("omenctl")
             brand_icon.set_pixel_size(20)
+        self.brand_icon = brand_icon
         left.append(brand_icon)
 
         self.floating_page_title = Gtk.Label(label=self._home_title())
         self.floating_page_title.add_css_class("floating-page-title")
         left.append(self.floating_page_title)
 
-        controls = Gtk.Box(spacing=6, halign=Gtk.Align.END, valign=Gtk.Align.CENTER)
+        controls = Gtk.Box(spacing=6)
         controls.append(self._make_window_control_button(
             "window-minimize-symbolic", self._on_window_minimize
         ))
@@ -2111,6 +2087,7 @@ class HPManagerWindow(Adw.ApplicationWindow if HAS_ADW else Gtk.ApplicationWindo
         else:
             device_img.set_from_icon_name("computer-symbolic")
         device_img.set_pixel_size(48)
+        self.logo_icon = device_img
         device_btn.set_child(device_img)
         device_btn.set_tooltip_text("Menüyü Aç/Kapat" if get_lang() == "tr" else "Toggle Menu")
         device_btn.connect("clicked", self._toggle_sidebar)
@@ -2138,13 +2115,14 @@ class HPManagerWindow(Adw.ApplicationWindow if HAS_ADW else Gtk.ApplicationWindo
         top_spacer = Gtk.Label(vexpand=True)
         sidebar.append(top_spacer)
 
+        # ── Navigation items (excluding Settings) ──
         nav_items = [
-            ("fan",          self.page_titles["fan"],          "weather-tornado-symbolic"),
-            ("lighting",     self.page_titles["lighting"],     "keyboard-brightness-symbolic"),
-            ("power",        self.page_titles["power"],        "weather-clear-symbolic"),
-            ("keyboard",     self.page_titles["keyboard"],     "input-keyboard-symbolic"),
-            ("app_profiles", self.page_titles["app_profiles"], "preferences-system-symbolic"),
-            ("mux",          "MUX",                            "video-display-symbolic"),
+            ("fan",       self.page_titles["fan"],       ["system-run-symbolic", "media-playback-start-symbolic", "applications-system-symbolic"]),
+            ("lighting",  self.page_titles["lighting"],  ["preferences-color-symbolic", "applications-graphics-symbolic", "color-management-symbolic"]),
+            ("power",     self.page_titles["power"],     ["battery-symbolic", "ac-adapter-symbolic", "power-profile-balanced-symbolic"]),
+            ("keyboard",  self.page_titles["keyboard"],  ["preferences-desktop-keyboard-symbolic", "input-keyboard-symbolic"]),
+            ("app_profiles", self.page_titles["app_profiles"], ["applications-system-symbolic", "preferences-system-symbolic"]),
+            ("mux",       "MUX",                        ["display-symbolic", "video-display-symbolic", "computer-symbolic"]),
         ]
 
         self.nav_indicators = {}
@@ -2165,7 +2143,7 @@ class HPManagerWindow(Adw.ApplicationWindow if HAS_ADW else Gtk.ApplicationWindo
         bottom_nav_box.append(self.theme_toggle_btn)
 
         # Settings button
-        self.settings_btn = self._make_nav_button("settings", self.page_titles["settings"], "emblem-system-symbolic")
+        self.settings_btn = self._make_nav_button("settings", self.page_titles["settings"], ["emblem-system-symbolic", "preferences-system-symbolic", "applications-system-symbolic"])
         bottom_nav_box.append(self.settings_btn)
 
         sidebar.append(bottom_nav_box)
@@ -2272,17 +2250,8 @@ class HPManagerWindow(Adw.ApplicationWindow if HAS_ADW else Gtk.ApplicationWindo
         root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         root.add_css_class("app-shell")
         root.set_overflow(Gtk.Overflow.HIDDEN)
-        if HAS_ADW:
-            self.set_content(root)
-        else:
-            self.set_child(root)
-
-        # Build and set custom titlebar (topbar)
-        self.topbar = self._build_floating_bar()
-        if HAS_ADW:
-            root.append(self.topbar)
-        else:
-            self.set_titlebar(self.topbar)
+        self._root_shell = root
+        self.set_child(root)
 
         self.stack = Gtk.Stack()
         self.stack.set_transition_type(Gtk.StackTransitionType.CROSSFADE)
@@ -2349,19 +2318,18 @@ class HPManagerWindow(Adw.ApplicationWindow if HAS_ADW else Gtk.ApplicationWindo
         self.stack.add_named(self.fan_page,        "fan")
         self.stack.add_named(self.lighting_page,   "lighting")
         self.stack.add_named(self.power_page,      "power")
-        self.stack.add_named(self.app_profiles_page, "app_profiles")
         self.stack.add_named(self.keyboard_page,   "keyboard")
+        self.stack.add_named(self.app_profiles_page, "app_profiles")
         self.stack.add_named(self.mux_page,        "mux")
         self.stack.add_named(self.settings_page,   "settings")
 
-        self.fan_page.set_dark(self._is_dark_mode())
+        self.fan_page.set_dark(self.app_theme == "dark")
         self.fan_page.set_temp_unit(self.temp_unit)
 
         self._rebuilding = True
         self.settings_page.set_theme_index(
             0 if self.app_theme == "dark" else 1 if self.app_theme == "light" else 2)
-        lang = get_lang()
-        self.settings_page.set_lang_index(0 if lang == "tr" else 1 if lang == "en" else 2)
+        self.settings_page.set_lang_index(0 if get_lang() == "tr" else 1)
         self.settings_page.set_temp_unit_index(0 if self.temp_unit == "C" else 1)
         self._rebuilding = False
 
@@ -2414,10 +2382,10 @@ class HPManagerWindow(Adw.ApplicationWindow if HAS_ADW else Gtk.ApplicationWindo
             "ram": "RAM",
         }
         icons = {
-            "cpu": "cpu-symbolic",
-            "disk": "drive-harddisk-symbolic",
-            "gpu": "video-display-symbolic",
-            "ram": "ram-symbolic",
+            "cpu": ["processor-symbolic", "cpu-symbolic"],
+            "disk": ["drive-harddisk-symbolic"],
+            "gpu": ["display-symbolic", "video-display-symbolic", "computer-symbolic"],
+            "ram": ["media-memory-symbolic", "media-flash-symbolic"],
         }
 
         spec_row = Gtk.Box(spacing=8, homogeneous=True)
@@ -2427,7 +2395,8 @@ class HPManagerWindow(Adw.ApplicationWindow if HAS_ADW else Gtk.ApplicationWindo
             item = Gtk.Box(spacing=6)
             item.add_css_class("home-spec-item")
 
-            ico = Gtk.Image.new_from_icon_name(icons[key])
+            gicon = Gio.ThemedIcon.new_from_names(icons[key])
+            ico = Gtk.Image.new_from_gicon(gicon)
             ico.set_pixel_size(14)
             item.append(ico)
 
@@ -2482,23 +2451,7 @@ class HPManagerWindow(Adw.ApplicationWindow if HAS_ADW else Gtk.ApplicationWindo
             "mux": "GPU switching mode and driver",
             "settings": "Theme, language and app settings",
         }
-        labels_hi = {
-            "dashboard": "सिस्टम अवलोकन और लाइव सेंसर",
-            "fan": "फैन, पावर और थर्मल प्रोफाइल",
-            "lighting": "लाइटिंग प्रभाव और चमक",
-            "power": "उन्नत अंडरवोल्ट और थर्मल सीमा सेटिंग्स",
-            "keyboard": "विशेष कुंजी और शॉर्टकट",
-            "app_profiles": "प्रति-ऐप पावर और फैन प्रोफाइल",
-            "mux": "GPU स्विचिंग मोड और ड्राइवर",
-            "settings": "थीम, भाषा और ऐप सेटिंग्स",
-        }
-        lang = str(get_lang() or "").lower()
-        if lang.startswith("tr"):
-            desc = labels_tr
-        elif lang.startswith("hi"):
-            desc = labels_hi
-        else:
-            desc = labels_en
+        desc = labels_tr if str(get_lang() or "").lower().startswith("tr") else labels_en
 
         cards = [
             ("dashboard", self.page_titles["dashboard"], "dashboard"),
@@ -2582,7 +2535,7 @@ class HPManagerWindow(Adw.ApplicationWindow if HAS_ADW else Gtk.ApplicationWindo
             target.add_css_class(target_cls)
 
         self._apply_home_scale(bucket)
-        for page_attr in ("fan_page", "lighting_page", "power_page", "app_profiles_page", "keyboard_page", "mux_page", "settings_page"):
+        for page_attr in ("fan_page", "lighting_page", "power_page", "keyboard_page", "app_profiles_page", "mux_page", "settings_page"):
             page = getattr(self, page_attr, None)
             if page and hasattr(page, "set_ui_scale"):
                 try:
@@ -2838,7 +2791,7 @@ class HPManagerWindow(Adw.ApplicationWindow if HAS_ADW else Gtk.ApplicationWindo
         icon.set_pixel_size(16)
         self.fullscreen_btn.set_child(icon)
 
-    def _make_nav_button(self, page_id, label, icon_name):
+    def _make_nav_button(self, page_id, label, icon_names):
         btn = Gtk.Button()
         btn.add_css_class("nav-item")
 
@@ -2855,7 +2808,11 @@ class HPManagerWindow(Adw.ApplicationWindow if HAS_ADW else Gtk.ApplicationWindo
         box.append(indicator)
         self.nav_indicators[page_id] = indicator
 
-        icon = Gtk.Image.new_from_icon_name(icon_name)
+        if isinstance(icon_names, (list, tuple)):
+            gicon = Gio.ThemedIcon.new_from_names(list(icon_names))
+            icon = Gtk.Image.new_from_gicon(gicon)
+        else:
+            icon = Gtk.Image.new_from_icon_name(icon_names)
         icon.set_pixel_size(24)
         icon.add_css_class("nav-icon")
         icon.set_valign(Gtk.Align.CENTER)
@@ -2949,17 +2906,13 @@ class HPManagerWindow(Adw.ApplicationWindow if HAS_ADW else Gtk.ApplicationWindo
         if hasattr(self, "theme_toggle_lbl") and self.theme_toggle_lbl is not None:
             self.theme_toggle_lbl.set_label(lbl_text)
 
-    def _update_theme_colors(self):
-        is_dark = self._is_dark_mode()
+    def _on_system_theme_notify(self):
+        self._update_theme_toggle_icon_state()
         self._apply_css()
         self._refresh_launcher_icon_colors()
-        if hasattr(self, 'fan_page') and self.fan_page is not None:
-            self.fan_page.set_dark(is_dark)
-        self._update_theme_toggle_icon_state()
-
-    def _on_system_dark_changed(self, *args):
-        if self.app_theme == "system":
-            self._update_theme_colors()
+        self._update_logo()
+        if hasattr(self, "menu_back_btn"):
+            self.menu_back_btn.set_child(self._build_menu_back_content())
 
     def _find_first_scrolled_window(self, widget):
         if widget is None:
@@ -3058,44 +3011,126 @@ class HPManagerWindow(Adw.ApplicationWindow if HAS_ADW else Gtk.ApplicationWindo
     def _update_logo(self):
         """Load the app logo from disk into self.logo_icon."""
         logo_path = os.path.join(IMAGES_DIR, "omenctl.png")
-        if hasattr(self, 'logo_icon'):
-            if os.path.exists(logo_path):
-                texture = Gdk.Texture.new_from_filename(logo_path)
+        if hasattr(self, 'logo_icon') and self.logo_icon is not None:
+            brand = get_model_branding().lower()
+            img_name = "victus.png" if "victus" in brand else "omen.png"
+            img_path = os.path.join(IMAGES_DIR, img_name)
+            if os.path.exists(img_path):
+                texture = Gdk.Texture.new_from_filename(img_path)
                 self.logo_icon.set_from_paintable(texture)
             else:
                 self.logo_icon.set_from_icon_name("computer-symbolic")
+        if hasattr(self, 'brand_icon') and self.brand_icon is not None:
+            if os.path.exists(logo_path):
+                texture = Gdk.Texture.new_from_filename(logo_path)
+                self.brand_icon.set_from_paintable(texture)
+            else:
+                self.brand_icon.set_from_icon_name("omenctl")
 
     # ── Daemon connection ─────────────────────────────────────────────────────
 
     def _connect_daemon(self):
+        """Connect to all D-Bus daemon services.
+
+        On first invocation (typically at startup or right after install) some
+        services may not yet be ready — each systemd unit has a 2-second
+        ExecStartPre sleep.  We therefore keep track of which services are still
+        missing and schedule a retry every 5 seconds for up to 60 seconds (12
+        attempts) so the GUI becomes fully functional without requiring a reboot.
+        """
+        if not hasattr(self, "_daemon_retry_count"):
+            self._daemon_retry_count = 0
+        if not hasattr(self, "_daemon_retry_timer"):
+            self._daemon_retry_timer = None
+
         try:
             from pydbus import SystemBus
             bus = SystemBus()
-            self.services = {}
-            for name in ("fan", "rgb", "power", "mux", "platform"):
-                try:
-                    self.services[name] = bus.get(f"com.yyl.hpmanager.{name}")
-                except Exception as e:
-                    print(f"⚠ {name} service unavailable: {e}")
-                    self.services[name] = None
-            
-            self.ready = True
-            self.fan_page.set_service(self.services["fan"])
-            self.fan_page.set_platform_service(self.services["platform"])
-            self.fan_page.set_power_service(self.services["power"])
-            self.fan_page.set_rgb_service(self.services["rgb"])
-            self.power_page.set_service(self.services["power"])
-            self.lighting_page.set_service(self.services["rgb"])
-            if hasattr(self, 'keyboard_page'):
-                self.keyboard_page.set_service(self.services["platform"])
-            self.mux_page.set_service(self.services["mux"])
-            self.settings_page.set_service(self.services["mux"])
-            self.app_profiles_page.set_power_service(self.services["power"])
-            print("Daemon connected")
-            self._refresh_launcher_metrics()
         except Exception as e:
-            print(f"⚠ Daemon connection failed: {e}")
-            print("  Application will run without daemon support.")
+            print(f"⚠ Cannot connect to D-Bus: {e}")
+            self._schedule_daemon_retry()
+            return
+
+        if not hasattr(self, "services") or self.services is None:
+            self.services = {}
+
+        # Only (re-)connect services that are not yet available
+        missing_after = []
+        for name in ("fan", "rgb", "power", "mux", "platform"):
+            if self.services.get(name) is not None:
+                continue  # already connected
+            try:
+                self.services[name] = bus.get(f"com.yyl.hpmanager.{name}")
+                print(f"✓ {name} service connected")
+            except Exception as e:
+                print(f"⚠ {name} service unavailable: {e}")
+                self.services[name] = None
+                missing_after.append(name)
+
+        # Push available services to pages regardless of whether all are up
+        self._apply_services_to_pages()
+
+        if missing_after:
+            self._schedule_daemon_retry()
+        else:
+            # All services up — cancel any pending retry timer
+            self._cancel_daemon_retry()
+            print("All daemon services connected.")
+            self._refresh_launcher_metrics()
+
+    def _apply_services_to_pages(self):
+        """Push currently-available services to their respective pages."""
+        svcs = getattr(self, "services", {}) or {}
+        self.ready = any(v is not None for v in svcs.values())
+
+        if hasattr(self, "fan_page") and self.fan_page is not None:
+            self.fan_page.set_service(svcs.get("fan"))
+            self.fan_page.set_platform_service(svcs.get("platform"))
+            self.fan_page.set_power_service(svcs.get("power"))
+            self.fan_page.set_rgb_service(svcs.get("rgb"))
+        if hasattr(self, "lighting_page") and self.lighting_page is not None:
+            self.lighting_page.set_service(svcs.get("rgb"))
+        if hasattr(self, "power_page") and self.power_page is not None:
+            self.power_page.set_service(svcs.get("power"))
+        if hasattr(self, "keyboard_page") and self.keyboard_page is not None:
+            self.keyboard_page.set_service(svcs.get("platform"))
+        if hasattr(self, "app_profiles_page") and self.app_profiles_page is not None:
+            self.app_profiles_page.set_power_service(svcs.get("power"))
+        if hasattr(self, "mux_page") and self.mux_page is not None:
+            self.mux_page.set_service(svcs.get("mux"))
+        if hasattr(self, "settings_page") and self.settings_page is not None:
+            self.settings_page.set_service(svcs.get("mux"))
+        self._refresh_launcher_metrics()
+
+    def _schedule_daemon_retry(self):
+        """Schedule a single retry attempt in 5 seconds (max 12 attempts)."""
+        MAX_RETRIES = 12
+        RETRY_INTERVAL_MS = 5000
+
+        self._daemon_retry_count = getattr(self, "_daemon_retry_count", 0) + 1
+        if self._daemon_retry_count > MAX_RETRIES:
+            print("⚠ Daemon retry limit reached. Some services may be unavailable.")
+            print("  If this is a fresh install, a reboot may still be required for kernel modules.")
+            return
+
+        print(f"  Retry {self._daemon_retry_count}/{MAX_RETRIES} in {RETRY_INTERVAL_MS // 1000}s…")
+        self._daemon_retry_timer = GLib.timeout_add(RETRY_INTERVAL_MS, self._daemon_retry_tick)
+
+    def _cancel_daemon_retry(self):
+        """Cancel any pending retry timer."""
+        tid = getattr(self, "_daemon_retry_timer", None)
+        if tid is not None:
+            try:
+                GLib.source_remove(tid)
+            except Exception:
+                pass
+            self._daemon_retry_timer = None
+
+    def _daemon_retry_tick(self):
+        """Called by the GLib timer; trigger a retry and return False to cancel timer."""
+        self._daemon_retry_timer = None  # timer fired, clear handle
+        self._connect_daemon()
+        return GLib.SOURCE_REMOVE
 
     def _set_performance_mode(self, profile):
         mode_map = {
@@ -3134,11 +3169,15 @@ class HPManagerWindow(Adw.ApplicationWindow if HAS_ADW else Gtk.ApplicationWindo
         self.app_theme = theme
         self._save_config()
         self._apply_theme_preference()
-        self._update_theme_colors()
+        self._apply_css()
+        self._refresh_launcher_icon_colors()
         if hasattr(self, "menu_back_btn"):
             self.menu_back_btn.set_child(self._build_menu_back_content())
+        if hasattr(self, 'fan_page'):
+            self.fan_page.set_dark(theme == "dark")
         self._update_logo()
         self._refresh_launcher_metrics()
+        self._update_theme_toggle_icon_state()
 
     def _on_lang_change(self, lang):
         if self._rebuilding:
@@ -3152,8 +3191,8 @@ class HPManagerWindow(Adw.ApplicationWindow if HAS_ADW else Gtk.ApplicationWindo
             "fan": T("fan"),
             "lighting": T("lighting"),
             "power": T("power_tuning"),
-            "app_profiles": T("app_profiles"),
             "keyboard": T("keyboard"),
+            "app_profiles": T("app_profiles"),
             "mux": "MUX",
             "settings": T("settings"),
         }
@@ -3369,31 +3408,6 @@ class HPManagerWindow(Adw.ApplicationWindow if HAS_ADW else Gtk.ApplicationWindo
         cpu_pct = data.get("cpu_pct")
         gpu_pct = data.get("gpu_pct")
 
-        # ── App-profile theme auto-switch ─────────────────────────────────────
-        if ok and ppi:
-            active_app = ppi.get("active_app")
-            app_profiles = ppi.get("app_profiles", {}) or {}
-            if active_app != getattr(self, "_app_profile_prev_active", None):
-                self._app_profile_prev_active = active_app
-                if active_app and active_app in app_profiles:
-                    val = app_profiles[active_app]
-                    theme_override = val.get("theme", "default") if isinstance(val, dict) else "default"
-                    if theme_override in ("dark", "light"):
-                        if not getattr(self, "_app_profile_theme_override", False):
-                            # Save the user's current theme before overriding
-                            self._app_profile_saved_theme = self.app_theme
-                        self._app_profile_theme_override = True
-                        self._on_theme_change(theme_override)
-                else:
-                    # App exited — restore saved theme
-                    if getattr(self, "_app_profile_theme_override", False):
-                        saved = getattr(self, "_app_profile_saved_theme", None)
-                        self._app_profile_theme_override = False
-                        self._app_profile_saved_theme = None
-                        if saved is not None:
-                            self._on_theme_change(saved)
-        # ─────────────────────────────────────────────────────────────────────
-
         if not ok:
             for pid, refs in self._launcher_cards.items():
                 if pid == "settings":
@@ -3459,28 +3473,20 @@ class HPManagerWindow(Adw.ApplicationWindow if HAS_ADW else Gtk.ApplicationWindo
 
         light = self._launcher_cards.get("lighting")
         if light:
-            rgb_available = ligi.get("rgb_available", True)
-            if not rgb_available:
-                light["metric_main"].set_label("Desteklenmiyor" if get_lang() == "tr" else "Unsupported")
-                light["metric_sub"].set_label("Yok" if get_lang() == "tr" else "None")
-                if light.get("mini_bar") is not None:
-                    light["mini_bar"].set_value(0)
-                self._set_launcher_badge("lighting", False)
-            else:
-                mode = str(ligi.get("mode", "unknown"))
-                mode_map = {
-                    "static": T("static_eff"),
-                    "breathing": T("breathing"),
-                    "wave": T("wave"),
-                    "cycle": T("cycle"),
-                }
-                bright = int(ligi.get("brightness", 0) or 0)
-                light["metric_main"].set_label(mode_map.get(mode, mode.capitalize()))
-                light["metric_sub"].set_label(f"{bright}%")
-                if light.get("mini_bar") is not None:
-                    light["mini_bar"].set_value(max(0, min(100, bright)))
-                lighting_module_ok = os.path.exists("/sys/module/hp_rgb_lighting")
-                self._set_launcher_badge("lighting", (not ok) or (not lighting_module_ok) or (not bool(ligi)))
+            mode = str(ligi.get("mode", "unknown"))
+            mode_map = {
+                "static": T("static_eff"),
+                "breathing": T("breathing"),
+                "wave": T("wave"),
+                "cycle": T("cycle"),
+            }
+            bright = int(ligi.get("brightness", 0) or 0)
+            light["metric_main"].set_label(mode_map.get(mode, mode.capitalize()))
+            light["metric_sub"].set_label(f"{bright}%")
+            if light.get("mini_bar") is not None:
+                light["mini_bar"].set_value(max(0, min(100, bright)))
+            lighting_module_ok = os.path.exists("/sys/module/hp_rgb_lighting")
+            self._set_launcher_badge("lighting", (not ok) or (not lighting_module_ok) or (not bool(ligi)))
 
         mux = self._launcher_cards.get("mux")
         if mux:
@@ -3516,9 +3522,8 @@ class HPManagerWindow(Adw.ApplicationWindow if HAS_ADW else Gtk.ApplicationWindo
             caps = ppi.get("capabilities", {}) if isinstance(ppi, dict) else {}
             supported = caps.get("supports_undervolt", True) or caps.get("supports_tcc_offset", True) or caps.get("supports_power_limits", True)
             is_tr = get_lang() == "tr"
-            is_hi = get_lang() == "hi"
             if not supported:
-                power["metric_main"].set_label("Desteklenmiyor" if is_tr else "असमर्थित" if is_hi else "Unsupported")
+                power["metric_main"].set_label("Desteklenmiyor" if is_tr else "Unsupported")
                 power["metric_sub"].set_label("")
                 self._set_launcher_dimmed("power", True)
                 if "power" in self.nav_buttons:
@@ -3526,10 +3531,8 @@ class HPManagerWindow(Adw.ApplicationWindow if HAS_ADW else Gtk.ApplicationWindo
             else:
                 uv = ppi.get("undervolt_mv", 0)
                 tcc = ppi.get("tcc_offset", 0)
-                default_lbl = "Varsayılan" if is_tr else "डिफ़ॉल्ट" if is_hi else "Default"
-                power["metric_main"].set_label(f"{uv}mV" if uv < 0 else default_lbl)
-                no_limit_lbl = "Limit Yok" if is_tr else "कोई सीमा नहीं" if is_hi else "No Limit"
-                power["metric_sub"].set_label(f"TCC: {tcc}" if tcc > 0 else no_limit_lbl)
+                power["metric_main"].set_label(f"{uv}mV" if uv < 0 else ("Varsayılan" if is_tr else "Default"))
+                power["metric_sub"].set_label(f"TCC: {tcc}" if tcc > 0 else ("Limit Yok" if is_tr else "No Limit"))
                 self._set_launcher_dimmed("power", False)
                 if "power" in self.nav_buttons:
                     self.nav_buttons["power"].set_visible(True)
@@ -3538,12 +3541,9 @@ class HPManagerWindow(Adw.ApplicationWindow if HAS_ADW else Gtk.ApplicationWindo
         app_profiles = self._launcher_cards.get("app_profiles")
         if app_profiles:
             is_tr = get_lang() == "tr"
-            is_hi = get_lang() == "hi"
             enabled = ppi.get("app_profiles_enabled", False)
-            active_lbl = ("Aktif" if enabled else "Kapalı") if is_tr else ("सक्रिय" if enabled else "निष्क्रिय") if is_hi else ("Active" if enabled else "Inactive")
-            auto_lbl = "Otomatik" if is_tr else "ऑटो" if is_hi else "Auto"
-            app_profiles["metric_main"].set_label(active_lbl)
-            app_profiles["metric_sub"].set_label(auto_lbl)
+            app_profiles["metric_main"].set_label(("Aktif" if enabled else "Kapalı") if is_tr else ("Active" if enabled else "Inactive"))
+            app_profiles["metric_sub"].set_label("Otomatik" if is_tr else "Auto")
             self._set_launcher_badge("app_profiles", False)
 
         settings = self._launcher_cards.get("settings")
@@ -3572,12 +3572,12 @@ class HPManagerWindow(Adw.ApplicationWindow if HAS_ADW else Gtk.ApplicationWindo
             if current_page == "dashboard":
                 current_page = "fan"
 
-            for attr in ('fan_page', 'lighting_page', 'power_page', 'app_profiles_page'):
+            for attr in ('fan_page', 'lighting_page', 'power_page'):
                 page = getattr(self, attr, None)
                 if page and hasattr(page, 'cleanup'):
                     page.cleanup()
 
-            for name in ("home", "fan", "lighting", "power", "app_profiles", "keyboard", "mux", "settings"):
+            for name in ("home", "fan", "lighting", "power", "keyboard", "app_profiles", "mux", "settings"):
                 child = self.stack.get_child_by_name(name)
                 if child:
                     self.stack.remove(child)
@@ -3600,8 +3600,8 @@ class HPManagerWindow(Adw.ApplicationWindow if HAS_ADW else Gtk.ApplicationWindo
             self.stack.add_named(self.fan_page,        "fan")
             self.stack.add_named(self.lighting_page,   "lighting")
             self.stack.add_named(self.power_page,      "power")
-            self.stack.add_named(self.app_profiles_page, "app_profiles")
             self.stack.add_named(self.keyboard_page,   "keyboard")
+            self.stack.add_named(self.app_profiles_page, "app_profiles")
             self.stack.add_named(self.mux_page,        "mux")
             self.stack.add_named(self.settings_page,   "settings")
 
@@ -3611,14 +3611,14 @@ class HPManagerWindow(Adw.ApplicationWindow if HAS_ADW else Gtk.ApplicationWindo
                 self.fan_page.set_service(services.get("fan"))
                 self.fan_page.set_platform_service(services.get("platform"))
                 self.fan_page.set_power_service(services.get("power"))
-                self.power_page.set_service(services.get("power"))
                 self.lighting_page.set_service(services.get("rgb"))
+                self.power_page.set_service(services.get("power"))
                 self.keyboard_page.set_service(services.get("platform"))
                 self.app_profiles_page.set_power_service(services.get("power"))
                 self.mux_page.set_service(services.get("mux"))
                 self.settings_page.set_service(services.get("mux"))
 
-            self.fan_page.set_dark(self._is_dark_mode())
+            self.fan_page.set_dark(self.app_theme == "dark")
             self.fan_page.set_temp_unit(self.temp_unit)
             if self.performance_mode == "eco":
                 self._set_performance_mode("power-saver")
@@ -3629,8 +3629,7 @@ class HPManagerWindow(Adw.ApplicationWindow if HAS_ADW else Gtk.ApplicationWindo
 
             self.settings_page.set_theme_index(
                 0 if self.app_theme == "dark" else 1 if self.app_theme == "light" else 2)
-            lang = get_lang()
-            self.settings_page.set_lang_index(0 if lang == "tr" else 1 if lang == "en" else 2)
+            self.settings_page.set_lang_index(0 if get_lang() == "tr" else 1)
             self.settings_page.set_temp_unit_index(0 if self.temp_unit == "C" else 1)
 
             self._navigate(current_page or "home")
@@ -3647,6 +3646,9 @@ class HPManagerWindow(Adw.ApplicationWindow if HAS_ADW else Gtk.ApplicationWindo
         if not getattr(self, "force_quit", False):
             self.set_visible(False)
             return True
+
+        # Cancel daemon retry timer if active
+        self._cancel_daemon_retry()
 
         self._clear_scroll_tracking()
         if self._ui_scale_tick_id:
@@ -3669,6 +3671,13 @@ class HPManagerWindow(Adw.ApplicationWindow if HAS_ADW else Gtk.ApplicationWindo
                     page.cleanup()
                 except Exception as e:
                     print(f"Cleanup error for {attr}: {e}")
+        # Terminate tray icon process when the application fully quits
+        if app is not None and getattr(app, "tray_proc", None) is not None:
+            try:
+                app.tray_proc.terminate()
+                app.tray_proc = None
+            except Exception:
+                pass
         try:
             app.quit()
         except Exception as e:
@@ -3683,6 +3692,7 @@ class HPManagerApp(Adw.Application if HAS_ADW else Gtk.Application):
         super().__init__(**kwargs)
         self.connect('command-line', self._on_command_line)
         self.tray_proc = None
+        self._tray_watchdog_id = None
 
     def _on_command_line(self, app, cmdline):
         args = cmdline.get_arguments()
@@ -3690,38 +3700,90 @@ class HPManagerApp(Adw.Application if HAS_ADW else Gtk.Application):
         is_quit = "--quit" in args
 
         if is_quit:
+            # Stop watchdog first so it won't restart the tray we're about to kill
+            self._stop_tray_watchdog()
             if hasattr(self, 'win'):
                 self.win.force_quit = True
                 self.win.close()
+            # Terminate tray process
             if self.tray_proc:
-                try: self.tray_proc.terminate()
-                except: pass
+                try:
+                    self.tray_proc.terminate()
+                    self.tray_proc = None
+                except Exception:
+                    pass
+            # Kill any stray omen-tray processes not tracked by us
+            try:
+                subprocess.run(["pkill", "-f", "omen-tray.py"], check=False)
+            except Exception:
+                pass
             self.quit()
             return 0
 
         if not hasattr(self, 'win'):
             print("Initializing window...", flush=True)
-            self.hold() # Ensure application remains running in background when hidden
+            self.hold()  # Keep app alive in background when hidden
             self.win = HPManagerWindow(application=app)
-            
-            tray_path = None
-            if shutil.which("omen-tray"):
-                tray_path = ["omen-tray"]
-            else:
-                local_tray = os.path.join(os.path.dirname(os.path.abspath(__file__)), "omen-tray.py")
-                if os.path.exists(local_tray):
-                    tray_path = [sys.executable, local_tray]
-            
-            if tray_path:
-                try:
-                    self.tray_proc = subprocess.Popen(tray_path)
-                except Exception as e:
-                    print(f"Failed to start tray process: {e}")
+            self._start_tray()
+            self._start_tray_watchdog()
 
         if not is_hidden:
             self.win.present()
 
         return 0
+
+    # ── Tray lifecycle ────────────────────────────────────────────────────────
+
+    def _start_tray(self):
+        """Launch the tray icon process, killing any stale instance first."""
+        if not shutil.which("omen-tray"):
+            return
+        # Kill any pre-existing stray tray process
+        try:
+            subprocess.run(["pkill", "-f", "omen-tray.py"], check=False)
+        except Exception:
+            pass
+        # Clear lock file so the new instance can acquire it
+        lock_file = os.path.expanduser("~/.cache/omen-tray.lock")
+        try:
+            if os.path.exists(lock_file):
+                os.remove(lock_file)
+        except Exception:
+            pass
+        try:
+            self.tray_proc = subprocess.Popen(["omen-tray"])
+            print("Tray icon started.", flush=True)
+        except Exception as e:
+            print(f"Failed to start tray process: {e}")
+
+    def _start_tray_watchdog(self):
+        """Start a 10-second periodic check to keep the tray icon alive."""
+        if self._tray_watchdog_id is not None:
+            return  # already running
+        self._tray_watchdog_id = GLib.timeout_add(10_000, self._tray_watchdog_tick)
+
+    def _stop_tray_watchdog(self):
+        """Cancel the watchdog timer."""
+        if self._tray_watchdog_id is not None:
+            try:
+                GLib.source_remove(self._tray_watchdog_id)
+            except Exception:
+                pass
+            self._tray_watchdog_id = None
+
+    def _tray_watchdog_tick(self):
+        """Called every 10 s — restart tray if it has died."""
+        # Stop if app is shutting down
+        if getattr(getattr(self, "win", None), "force_quit", False):
+            self._tray_watchdog_id = None
+            return GLib.SOURCE_REMOVE
+
+        proc = getattr(self, "tray_proc", None)
+        if proc is None or proc.poll() is not None:
+            print("Tray process died — restarting...", flush=True)
+            self._start_tray()
+
+        return GLib.SOURCE_CONTINUE
 
 
 def main():

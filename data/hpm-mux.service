@@ -10,12 +10,12 @@ ExecStart=/usr/bin/python3 /usr/libexec/hp-manager/services/mux_service.py
 Restart=on-failure
 RestartSec=3
 
-# Security hardening — namespace-creating directives (PrivateTmp, ProtectHome)
-# disabled to fix status=226/NAMESPACE on Ubuntu 24.04+/Zorin OS 18.
-# These conflict with AppArmor profiles or systemd configurations on affected kernels.
-# Non-namespace directives are kept for defence-in-depth.
+# Security hardening — namespace-creating directives (PrivateTmp, ProtectHome,
+# PrivateNetwork) disabled to fix status=226/NAMESPACE on Ubuntu 24.04+/Zorin OS 18.
+# Non-namespace directives are kept for defence-in-depth with proper hardware capabilities.
 ProtectHome=false
 PrivateTmp=false
+PrivateNetwork=false
 NoNewPrivileges=true
 LockPersonality=true
 RestrictSUIDSGID=true
@@ -27,9 +27,7 @@ ProtectControlGroups=true
 RestrictNamespaces=true
 MemoryDenyWriteExecute=true
 SystemCallFilter=@system-service
-CapabilityBoundingSet=CAP_DAC_OVERRIDE
-PrivateNetwork=yes
-ProtectHome=read-only
+CapabilityBoundingSet=CAP_DAC_OVERRIDE CAP_SYS_ADMIN CAP_SYS_RAWIO CAP_NET_ADMIN
 
 [Install]
 WantedBy=multi-user.target

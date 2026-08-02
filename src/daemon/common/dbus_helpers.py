@@ -30,20 +30,24 @@ def _setup_sleep_handler(service_name: str):
     """Subscribe to logind PrepareForSleep signals."""
     try:
         bus = SystemBus()
-        logind = bus.get(
-            "org.freedesktop.login1", "/org/freedesktop/login1/Manager"
-        )
 
-        def _on_props_changed(_iface, changed, _invalidated):
-            if "PrepareForSleep" in changed:
-                if changed["PrepareForSleep"]:
+        def _on_prepare_for_sleep(sender, obj, iface, signal, params):
+            if params:
+                sleeping = params[0]
+                if sleeping:
                     logger.info("[%s] System preparing for sleep", service_name)
                     system_sleeping.set()
                 else:
                     logger.info("[%s] System waking up", service_name)
                     system_sleeping.clear()
 
-        logind.onPropertiesChanged = _on_props_changed
+        bus.subscribe(
+            sender="org.freedesktop.login1",
+            iface="org.freedesktop.login1.Manager",
+            signal="PrepareForSleep",
+            object="/org/freedesktop/login1",
+            signal_fired=_on_prepare_for_sleep
+        )
         logger.info("[%s] Sleep/wake handler registered", service_name)
     except Exception as exc:
         logger.warning(
@@ -84,9 +88,7 @@ def run_service(
     signal.signal(signal.SIGINT, _shutdown)
 
     if handle_sleep:
-        threading.Thread(
-            target=_setup_sleep_handler, args=(service_name,), daemon=True
-        ).start()
+        _setup_sleep_handler(service_name)
 
     try:
         bus = SystemBus()

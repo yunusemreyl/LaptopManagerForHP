@@ -19,12 +19,14 @@
             pygobject3
             pydbus
             pycairo
+            pystray
+            pillow
           ]);
         in
         {
           omenctl = pkgs.stdenv.mkDerivation {
             pname = "omenctl";
-            version = "1.6.0-preview";
+            version = "1.6.6";
 
             src = ./.;
 
@@ -69,6 +71,12 @@
                 chmod +x $out/libexec/hp-manager/omen-cli.py
                 sed -i "1s|.*|#!${pythonEnv}/bin/python|" $out/libexec/hp-manager/omen-cli.py
                 ln -sf $out/libexec/hp-manager/omen-cli.py $out/bin/omen
+              fi
+              if [ -f src/omen-tray.py ]; then
+                cp src/omen-tray.py $out/libexec/hp-manager/
+                chmod +x $out/libexec/hp-manager/omen-tray.py
+                sed -i "1s|.*|#!${pythonEnv}/bin/python|" $out/libexec/hp-manager/omen-tray.py
+                ln -sf $out/libexec/hp-manager/omen-tray.py $out/bin/omen-tray
               fi
 
               # System files
@@ -136,7 +144,7 @@
             boot.extraModulePackages = lib.mkIf cfg.loadCustomDriver [
               (config.boot.kernelPackages.kernel.stdenv.mkDerivation {
                 pname = "omenctl-driver";
-                version = "1.6.0-preview";
+                version = "1.6.6";
                 src = "${self.packages.${pkgs.system}.omenctl.src}/driver";
                 
                 nativeBuildInputs = config.boot.kernelPackages.kernel.moduleBuildDependencies;

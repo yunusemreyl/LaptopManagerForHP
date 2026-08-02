@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 """Settings Page with GitHub update checker — i18n via T()."""
 import os, platform, threading, json, subprocess, shutil, tempfile, glob
+from utils.updater import OmenUpdater
+from utils.diagnostics import generate_diagnostic_report, generate_github_issue_body
 import gi
 gi.require_version('Gtk', '4.0')
 from gi.repository import Gtk, GLib, Gdk
 from widgets.smooth_scroll import SmoothScrolledWindow
+from widgets.mapping_wizard import MappingWizard
 
 import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -19,8 +22,8 @@ def T(k):
     return _T(k)
 
 
-APP_VERSION = "1.6.0-preview"
-GITHUB_REPO = "CodesRahul96/OmenCtl"
+APP_VERSION = "1.6.6"
+GITHUB_REPO = "yunusemreyl/OmenCtl"
 GITHUB_API_URL = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 GITHUB_RELEASES_URL = f"https://github.com/{GITHUB_REPO}/releases/latest"
 
@@ -110,14 +113,10 @@ class SettingsPage(Gtk.Box):
             ver_badge_border = "rgba(255, 255, 255, 0.1)"
             ver_badge_fg = "rgba(255, 255, 255, 0.8)"
             dev_link_fg = "rgba(255, 255, 255, 0.6)"
-            link_color = "#6db3ff"
             disclaimer_bg = "rgba(255, 255, 255, 0.04)"
             disclaimer_fg = "rgba(255, 255, 255, 0.55)"
             progress_trough_bg = "rgba(255, 255, 255, 0.05)"
             sys_info_val_fg = "rgba(255, 255, 255, 0.6)"
-            sys_info_chip_bg = "rgba(255, 255, 255, 0.05)"
-            sys_info_chip_border = "rgba(255, 255, 255, 0.08)"
-            sys_info_icon_fg = "rgba(168, 85, 247, 0.9)"
             drop_bg = "rgba(255, 255, 255, 0.08)"
             drop_border = "rgba(255, 255, 255, 0.07)"
             drop_hover_bg = "rgba(255, 255, 255, 0.12)"
@@ -136,14 +135,10 @@ class SettingsPage(Gtk.Box):
             ver_badge_border = "rgba(0, 0, 0, 0.1)"
             ver_badge_fg = "rgba(0, 0, 0, 0.8)"
             dev_link_fg = "rgba(0, 0, 0, 0.6)"
-            link_color = "#1a73e8"
             disclaimer_bg = "rgba(0, 0, 0, 0.04)"
             disclaimer_fg = "rgba(0, 0, 0, 0.55)"
             progress_trough_bg = "rgba(0, 0, 0, 0.05)"
             sys_info_val_fg = "rgba(0, 0, 0, 0.6)"
-            sys_info_chip_bg = "rgba(0, 0, 0, 0.04)"
-            sys_info_chip_border = "rgba(0, 0, 0, 0.07)"
-            sys_info_icon_fg = "#7c3aed"
             drop_bg = "rgba(0, 0, 0, 0.05)"
             drop_border = "rgba(0, 0, 0, 0.06)"
             drop_hover_bg = "rgba(0, 0, 0, 0.1)"
@@ -275,25 +270,12 @@ class SettingsPage(Gtk.Box):
             font-size: 11px;
             color: {dev_link_fg};
         }}
-        .about-dev-link link {{
-            color: {link_color};
+        .about-dev-link a {{
+            color: #0a84ff;
             font-weight: 600;
+            text-decoration: none;
         }}
-        .about-dev-link link:hover {{
-            color: {link_color};
-        }}
-        .dev-link-btn {{
-            background: transparent;
-            border: none;
-            box-shadow: none;
-            padding: 0;
-            min-height: 0;
-            color: {link_color};
-            font-size: 11px;
-            font-weight: 600;
-        }}
-        .dev-link-btn:hover {{
-            background: transparent;
+        .about-dev-link a:hover {{
             text-decoration: underline;
         }}
         .about-disclaimer-box {{
@@ -350,47 +332,6 @@ class SettingsPage(Gtk.Box):
         dropdown:hover, dropdown button:hover {{
             background: {drop_hover_bg};
             border-color: {drop_hover_border};
-        }}
-
-        /* ── System Info Chips ── */
-        .sys-info-grid {{
-            margin-top: 4px;
-            margin-bottom: 4px;
-        }}
-        .sys-info-chip {{
-            background: {sys_info_chip_bg};
-            border: 1px solid {sys_info_chip_border};
-            border-radius: 10px;
-            padding: 10px 14px;
-            min-width: 0;
-        }}
-        .sys-info-chip-icon {{
-            font-size: 15px;
-            margin-right: 2px;
-            color: {sys_info_icon_fg};
-        }}
-        .sys-info-chip-key {{
-            font-size: 10px;
-            font-weight: 600;
-            letter-spacing: 0.4px;
-            text-transform: uppercase;
-            color: {sys_info_val_fg};
-            margin-bottom: 2px;
-        }}
-        .sys-info-chip-val {{
-            font-size: 12px;
-            font-weight: 600;
-            color: {fg};
-            font-family: "JetBrains Mono", "Geist Mono", monospace;
-        }}
-        .sys-drivers-header {{
-            font-size: 10px;
-            font-weight: 700;
-            letter-spacing: 0.5px;
-            text-transform: uppercase;
-            color: {sys_info_val_fg};
-            margin-top: 4px;
-            margin-bottom: 2px;
         }}
         """
         self._css_provider.load_from_data(css.encode())
@@ -491,7 +432,7 @@ class SettingsPage(Gtk.Box):
         appear_card.append(self._make_sep())
 
         # Language row
-        self.lang_dd = Gtk.DropDown(model=Gtk.StringList.new(["Türkçe", "English", "हिन्दी"]))
+        self.lang_dd = Gtk.DropDown(model=Gtk.StringList.new(["Türkçe", "English"]))
         self.lang_dd.connect("notify::selected", self._on_lang)
         appear_card.append(self._make_settings_row(
             "🌐", T("lang_label"), self.lang_dd, bg_class="icon-bg-lang"))
@@ -578,17 +519,11 @@ class SettingsPage(Gtk.Box):
         update_card.append(self.update_progress)
 
         # Restart button
-        self.restart_btn = Gtk.Button()
-        restart_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        restart_icon = Gtk.Image.new_from_icon_name("view-refresh-symbolic")
-        restart_icon.set_pixel_size(16)
-        restart_box.append(restart_icon)
-        restart_box.append(Gtk.Label(label=T("restart_app")))
-        self.restart_btn.set_child(restart_box)
+        self.restart_btn = Gtk.Button(label=T("restart_app"))
         self.restart_btn.add_css_class("suggested-action")
         self.restart_btn.set_visible(False)
         self.restart_btn.connect("clicked", self._restart_app)
-        update_row.append(self.restart_btn)
+        update_card.append(self.restart_btn)
 
         content.append(update_card)
 
@@ -602,55 +537,21 @@ class SettingsPage(Gtk.Box):
 
         content.append(self._make_section_header("💻", T("sys_info")))
 
-        # ── 2-column chip grid for system properties ──
-        sys_data = [
-            ("🖥️", T("computer"),  platform.node()),
-            ("🐧", T("os_name"),   self._get_distro()),
-            ("⚙️", T("kernel"),    platform.release()),
-            ("🔌", T("arch"),      platform.machine()),
+        # System info rows with emojis
+        sys_info = [
+            ("🖥️",           T("computer"),  platform.node(),       "icon-bg-theme"),
+            ("⚙️",           T("kernel"),    platform.release(),    "icon-bg-mux"),
+            ("🐧",           T("os_name"),   self._get_distro(),    "icon-bg-lang"),
+            ("🔌",           T("arch"),      platform.machine(),    "icon-bg-sys"),
         ]
+        
+        for idx, (emoji, label, value, bg_class) in enumerate(sys_info):
+            row = self._make_settings_row(emoji, label, Gtk.Box(), sublabel=value, bg_class=bg_class)
+            info_card.append(row)
+            if idx < len(sys_info) - 1:
+                info_card.append(self._make_sep())
 
-        chip_grid = Gtk.Grid(column_spacing=10, row_spacing=10, hexpand=True)
-        chip_grid.add_css_class("sys-info-grid")
-        chip_grid.set_margin_top(6)
-        chip_grid.set_margin_bottom(6)
-        chip_grid.set_margin_start(4)
-        chip_grid.set_margin_end(4)
-
-        for i, (emoji, label, value) in enumerate(sys_data):
-            col = i % 2
-            row = i // 2
-
-            chip = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4, hexpand=True, valign=Gtk.Align.CENTER)
-            chip.add_css_class("sys-info-chip")
-
-            # Key row: icon + label
-            key_row = Gtk.Box(spacing=5, valign=Gtk.Align.CENTER)
-            icon_lbl = Gtk.Label(label=emoji)
-            icon_lbl.add_css_class("sys-info-chip-icon")
-            key_row.append(icon_lbl)
-            key_lbl = Gtk.Label(label=label.upper(), xalign=0)
-            key_lbl.add_css_class("sys-info-chip-key")
-            key_row.append(key_lbl)
-            chip.append(key_row)
-
-            # Value
-            val_lbl = Gtk.Label(label=value or "—", xalign=0, halign=Gtk.Align.START)
-            val_lbl.add_css_class("sys-info-chip-val")
-            val_lbl.set_ellipsize(3)  # PANGO_ELLIPSIZE_END
-            chip.append(val_lbl)
-
-            chip_grid.attach(chip, col, row, 1, 1)
-
-        info_card.append(chip_grid)
         info_card.append(self._make_sep())
-
-        # ── Drivers sub-section ──
-        drv_header = Gtk.Label(label=T("driver_status"), xalign=0)
-        drv_header.add_css_class("sys-drivers-header")
-        drv_header.set_margin_start(4)
-        drv_header.set_margin_top(4)
-        info_card.append(drv_header)
 
         # Driver status rows
         hp_rgb_loaded = self._is_module_loaded("hp_rgb_lighting")
@@ -661,7 +562,7 @@ class SettingsPage(Gtk.Box):
 
         info_card.append(self._make_driver_row("💡", "hp-rgb-lighting", hp_rgb_loaded))
         info_card.append(self._make_sep())
-        info_card.append(self._make_driver_row("🌪️", "hp-wmi  (Fan / Thermal / Key)", hp_wmi_loaded))
+        info_card.append(self._make_driver_row("🌪️", "hp-wmi (Fan/Thermal/Key)", hp_wmi_loaded))
 
         content.append(info_card)
 
@@ -698,50 +599,32 @@ class SettingsPage(Gtk.Box):
 
         content.append(self._make_section_header("🩺", T("debug_info_title")))
 
-        # Show Terminal button cell
-        term_btn = Gtk.Button()
-        term_btn.add_css_class("settings-row")
-        term_btn.connect("clicked", self._show_debug_terminal)
+        dump_btn = Gtk.Button()
+        dump_btn.add_css_class("settings-row")
+        dump_btn.connect("clicked", lambda *_: self.main_stack.set_visible_child_name("dump"))
         
-        term_inner = Gtk.Box(spacing=12, valign=Gtk.Align.CENTER)
+        dump_inner = Gtk.Box(spacing=12, valign=Gtk.Align.CENTER)
         
-        self._debug_term_icon = None
-
-        term_lbl = Gtk.Label(label=f"📟  {T('show_debug_info')}", xalign=0, hexpand=True, valign=Gtk.Align.CENTER)
-        term_lbl.add_css_class("settings-row-label")
-        term_inner.append(term_lbl)
+        dump_lbl = Gtk.Label(label=f"📟  {T('troubleshooting_dump')}", xalign=0, hexpand=True, valign=Gtk.Align.CENTER)
+        dump_lbl.add_css_class("settings-row-label")
+        dump_inner.append(dump_lbl)
 
         chevron1 = Gtk.Image.new_from_icon_name("go-next-symbolic")
         chevron1.add_css_class("chevron-arrow")
-        term_inner.append(chevron1)
-        term_btn.set_child(term_inner)
-        debug_card.append(term_btn)
-
-        debug_card.append(self._make_sep())
-
-        # Copy Log button cell
-        copy_btn = Gtk.Button()
-        copy_btn.add_css_class("settings-row")
-        copy_btn.connect("clicked", self._copy_debug_log)
-        
-        copy_inner = Gtk.Box(spacing=12, valign=Gtk.Align.CENTER)
-        
-        self._debug_copy_icon = None
-
-        self.copy_btn_label = Gtk.Label(label=f"📋  {T('copy_debug_log')}", xalign=0, hexpand=True, valign=Gtk.Align.CENTER)
-        self.copy_btn_label.add_css_class("settings-row-label")
-        copy_inner.append(self.copy_btn_label)
-
-        chevron2 = Gtk.Image.new_from_icon_name("go-next-symbolic")
-        chevron2.add_css_class("chevron-arrow")
-        copy_inner.append(chevron2)
-        copy_btn.set_child(copy_inner)
-        debug_card.append(copy_btn)
+        dump_inner.append(chevron1)
+        dump_btn.set_child(dump_inner)
+        debug_card.append(dump_btn)
 
         content.append(debug_card)
 
         # ══════════════════════════════════════════════════════════════════════
-        # 6. ABOUT CARD
+        # 6. PER-KEY RGB MAPPING
+        # ══════════════════════════════════════════════════════════════════════
+        self.mapping_wizard = MappingWizard()
+        content.append(self.mapping_wizard)
+
+        # ══════════════════════════════════════════════════════════════════════
+        # 7. ABOUT CARD
         # ══════════════════════════════════════════════════════════════════════
         about_card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         about_card.add_css_class("settings-card")
@@ -780,27 +663,11 @@ class SettingsPage(Gtk.Box):
         name_row.append(ver_badge)
         about_text.append(name_row)
 
-        # Developer row with link buttons
-        dev_prefix = Gtk.Label(label=f"{T('developer')}: ", xalign=0, halign=Gtk.Align.START)
-        dev_prefix.add_css_class("about-dev-link")
-        
-        dev_row = Gtk.Box(spacing=4, valign=Gtk.Align.CENTER, halign=Gtk.Align.START)
-        dev_row.append(dev_prefix)
-        
-        btn_rahul = Gtk.LinkButton.new_with_label("https://github.com/CodesRahul96", "CodesRahul96")
-        btn_rahul.add_css_class("dev-link-btn")
-        btn_rahul.set_valign(Gtk.Align.CENTER)
-        dev_row.append(btn_rahul)
-        
-        sep_lbl = Gtk.Label(label=" & ", css_classes=["about-dev-link"])
-        dev_row.append(sep_lbl)
-        
-        btn_yyl = Gtk.LinkButton.new_with_label("https://github.com/yunusemreyl", "yunusemreyl")
-        btn_yyl.add_css_class("dev-link-btn")
-        btn_yyl.set_valign(Gtk.Align.CENTER)
-        dev_row.append(btn_yyl)
-        
-        about_text.append(dev_row)
+        dev_lbl = Gtk.Label(
+            label=f"{T('developer')}: <a href='https://github.com/yunusemreyl'>yunusemreyl</a>",
+            use_markup=True, xalign=0, halign=Gtk.Align.START)
+        dev_lbl.add_css_class("about-dev-link")
+        about_text.append(dev_lbl)
 
         # Horizontal Box grouping Texts (Left-aligned, flush left)
         profile_row = Gtk.Box(spacing=16, valign=Gtk.Align.CENTER, halign=Gtk.Align.START)
@@ -827,9 +694,207 @@ class SettingsPage(Gtk.Box):
 
         # ── Assemble ──
         scroll.set_child(content)
-        self.append(scroll)
+        
+        self.main_stack = Gtk.Stack()
+        self.main_stack.set_transition_type(Gtk.StackTransitionType.SLIDE_LEFT_RIGHT)
+        self.main_stack.set_transition_duration(250)
+        
+        self.main_stack.add_named(scroll, "main")
+        self.main_stack.add_named(self._build_dump_page(), "dump")
+        
+        self.append(self.main_stack)
+        
         GLib.idle_add(self._refresh_mux_backend)
         self.set_ui_scale("normal")
+
+    # ── Dump Page UI ──────────────────────────────────────────────────────────
+
+    def _build_dump_page(self):
+        page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        
+        # Header Box
+        header = Gtk.Box(spacing=12, orientation=Gtk.Orientation.HORIZONTAL)
+        header.set_margin_top(12)
+        header.set_margin_bottom(12)
+        header.set_margin_start(16)
+        header.set_margin_end(16)
+        
+        back_btn = Gtk.Button(label=f"⬅️ {T('back')}")
+        back_btn.add_css_class("suggested-action")
+        back_btn.connect("clicked", lambda *_: self.main_stack.set_visible_child_name("main"))
+        header.append(back_btn)
+        
+        title_lbl = Gtk.Label(label=T("thanks_for_using"), hexpand=True, halign=Gtk.Align.CENTER)
+        title_lbl.add_css_class("settings-row-label")
+        header.append(title_lbl)
+        
+        self.github_issue_btn = Gtk.Button(label=f"🚀 {T('send_to_github')}")
+        self.github_issue_btn.add_css_class("suggested-action")
+        self.github_issue_btn.connect("clicked", self._create_github_issue)
+        header.append(self.github_issue_btn)
+        
+        page.append(header)
+        page.append(self._make_sep())
+        
+        # Scrolled window for content
+        scroll = SmoothScrolledWindow(vexpand=True)
+        scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        
+        self.dump_content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)
+        self.dump_content.set_margin_top(16)
+        self.dump_content.set_margin_bottom(16)
+        self.dump_content.set_margin_start(24)
+        self.dump_content.set_margin_end(24)
+        scroll.set_child(self.dump_content)
+        page.append(scroll)
+        
+        self.main_stack.connect("notify::visible-child-name", self._on_stack_changed)
+        
+        return page
+
+    def _on_stack_changed(self, stack, param):
+        if stack.get_visible_child_name() == "dump":
+            self._load_dump_data()
+
+    def _load_dump_data(self):
+        # clear content
+        while child := self.dump_content.get_first_child():
+            self.dump_content.remove(child)
+            
+        spinner = Gtk.Spinner()
+        spinner.start()
+        spinner.set_halign(Gtk.Align.CENTER)
+        spinner.set_size_request(32, 32)
+        self.dump_content.append(spinner)
+        
+        def _worker():
+            try:
+                from pydbus import SystemBus
+                import json
+                bus = SystemBus()
+                svc = bus.get("com.yyl.hpmanager.platform")
+                j_str = svc.GetHardwareDumpJson()
+                GLib.idle_add(self._render_dump_data, j_str)
+            except Exception as e:
+                GLib.idle_add(self._render_dump_error, str(e))
+                
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _render_dump_error(self, error_str):
+        while child := self.dump_content.get_first_child():
+            self.dump_content.remove(child)
+        err_lbl = Gtk.Label(label=f"Failed to fetch data: {error_str}")
+        self.dump_content.append(err_lbl)
+
+    def _render_dump_data(self, json_str):
+        import json
+        while child := self.dump_content.get_first_child():
+            self.dump_content.remove(child)
+            
+        try:
+            data = json.loads(json_str)
+        except Exception as e:
+            self._render_dump_error(f"JSON Parse Error: {e}")
+            return
+        
+        # System Table
+        sys_data = data.get("system", {})
+        self.dump_content.append(self._make_section_header("💻", T("sys_info")))
+        
+        sys_grid = Gtk.Grid(row_spacing=8, column_spacing=16)
+        sys_grid.set_halign(Gtk.Align.CENTER)
+        row = 0
+        
+        lbl_p = Gtk.Label(label="Property", halign=Gtk.Align.START)
+        lbl_p.add_css_class("section-title")
+        sys_grid.attach(lbl_p, 0, row, 1, 1)
+        
+        lbl_v = Gtk.Label(label="Value", halign=Gtk.Align.START)
+        lbl_v.add_css_class("section-title")
+        sys_grid.attach(lbl_v, 1, row, 1, 1)
+        
+        row += 1
+        for k, v in sys_data.items():
+            sys_grid.attach(Gtk.Label(label=str(k), halign=Gtk.Align.START), 0, row, 1, 1)
+            sys_grid.attach(Gtk.Label(label=str(v), halign=Gtk.Align.START), 1, row, 1, 1)
+            row += 1
+        self.dump_content.append(sys_grid)
+        self.dump_content.append(self._make_sep())
+            
+        # Capabilities Table
+        cap_data = data.get("capabilities", {})
+        if cap_data:
+            self.dump_content.append(self._make_section_header("⚙️", "Donanım Yetenekleri"))
+            cap_grid = Gtk.Grid(row_spacing=8, column_spacing=16)
+            cap_grid.set_halign(Gtk.Align.CENTER)
+            row = 0
+            lbl_p = Gtk.Label(label="Özellik", halign=Gtk.Align.START)
+            lbl_p.add_css_class("section-title")
+            cap_grid.attach(lbl_p, 0, row, 1, 1)
+            lbl_v = Gtk.Label(label="Durum", halign=Gtk.Align.START)
+            lbl_v.add_css_class("section-title")
+            cap_grid.attach(lbl_v, 1, row, 1, 1)
+            row += 1
+            for k, v in cap_data.items():
+                cap_grid.attach(Gtk.Label(label=str(k), halign=Gtk.Align.START), 0, row, 1, 1)
+                cap_grid.attach(Gtk.Label(label=str(v), halign=Gtk.Align.START), 1, row, 1, 1)
+                row += 1
+            self.dump_content.append(cap_grid)
+            self.dump_content.append(self._make_sep())
+            
+        # ACPI Table
+        acpi = data.get("acpi", {})
+        methods = acpi.get("methods_found", {})
+        
+        self.dump_content.append(self._make_section_header("🔍", "ACPI / DSDT Mappings"))
+        grid = Gtk.Grid(row_spacing=8, column_spacing=16)
+        grid.set_halign(Gtk.Align.CENTER)
+        
+        row = 0
+        lbl1 = Gtk.Label(label="Offset / Metod", halign=Gtk.Align.START)
+        lbl1.add_css_class("section-title")
+        lbl2 = Gtk.Label(label="Değer / Karşılık", halign=Gtk.Align.START)
+        lbl2.add_css_class("section-title")
+        grid.attach(lbl1, 0, row, 1, 1)
+        grid.attach(lbl2, 1, row, 1, 1)
+        row += 1
+        
+        if not methods:
+            grid.attach(Gtk.Label(label="No methods found", halign=Gtk.Align.START), 0, row, 2, 1)
+        else:
+            for k, v in methods.items():
+                l1 = Gtk.Label(label=str(k), halign=Gtk.Align.START)
+                l2 = Gtk.Label(label=str(v), halign=Gtk.Align.START)
+                grid.attach(l1, 0, row, 1, 1)
+                grid.attach(l2, 1, row, 1, 1)
+                row += 1
+                
+        self.dump_content.append(grid)
+        self.dump_content.append(self._make_sep())
+        
+        # Errors in bash
+        errors = acpi.get("errors", [])
+        if errors:
+            self.dump_content.append(self._make_section_header("⚠️", "Hatalar / Çıktılar"))
+            
+            tv = Gtk.TextView()
+            tv.set_editable(False)
+            tv.set_monospace(True)
+            # Apply some terminal like styling
+            tv.get_style_context().add_class("card-diag")
+            tv.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
+            tv.set_margin_start(8)
+            tv.set_margin_end(8)
+            tv.set_margin_top(8)
+            tv.set_margin_bottom(8)
+            
+            buf = tv.get_buffer()
+            buf.set_text("\n".join(errors))
+            
+            scroll_err = Gtk.ScrolledWindow(vexpand=True)
+            scroll_err.set_child(tv)
+            scroll_err.set_size_request(-1, 200)
+            self.dump_content.append(scroll_err)
 
     # ── UI Scaling ────────────────────────────────────────────────────────────
 
@@ -890,7 +955,8 @@ class SettingsPage(Gtk.Box):
                 btn.set_size_request(-1, btn_h)
 
         for icon in (getattr(self, "_debug_term_icon", None),
-                     getattr(self, "_debug_copy_icon", None)):
+                     getattr(self, "_debug_copy_icon", None),
+                     getattr(self, "_debug_github_icon", None)):
             if icon is not None and hasattr(icon, 'set_pixel_size'):
                 icon.set_pixel_size(icon_sz)
 
@@ -970,6 +1036,7 @@ class SettingsPage(Gtk.Box):
             self.mux_status.set_label(f"{T('error')}: {e}")
 
     # ── Update Checker ────────────────────────────────────────────────────────
+
     def _check_update(self, btn):
         self.update_btn.set_sensitive(False)
         self.update_spinner.set_visible(True)
@@ -978,24 +1045,9 @@ class SettingsPage(Gtk.Box):
         self.download_btn.set_visible(False)
         self.install_btn.set_visible(False)
         self.restart_btn.set_visible(False)
-        self._latest_tarball_url = None
-        threading.Thread(target=self._do_check_update, daemon=True).start()
-
-    def _do_check_update(self):
-        try:
-            import urllib.request
-            req = urllib.request.Request(GITHUB_API_URL, headers={"Accept": "application/vnd.github.v3+json"})
-            with urllib.request.urlopen(req, timeout=10) as resp:
-                data = json.loads(resp.read().decode())
-                latest = data.get("tag_name", "").lstrip("v").strip()
-                tarball_url = data.get("tarball_url", "")
-                if latest and self._version_compare(latest, APP_VERSION) > 0:
-                    self._latest_tarball_url = tarball_url
-                    GLib.idle_add(self._update_result, True, latest)
-                else:
-                    GLib.idle_add(self._update_result, False, latest or APP_VERSION)
-        except Exception as e:
-            GLib.idle_add(self._update_error, str(e))
+        if not hasattr(self, 'updater'):
+            self.updater = OmenUpdater(APP_VERSION, T)
+        self.updater.check_update_async(self._update_result, self._update_error)
 
     def _update_result(self, has_update, latest_ver):
         self.update_spinner.stop()
@@ -1016,14 +1068,11 @@ class SettingsPage(Gtk.Box):
         self.update_status.set_label(T("conn_failed"))
 
     def _open_releases(self, btn):
-        subprocess.Popen(["xdg-open", GITHUB_RELEASES_URL], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if not hasattr(self, 'updater'):
+            self.updater = OmenUpdater(APP_VERSION, T)
+        self.updater.open_releases_page()
 
-    # ── Auto Update Installer ────────────────────────────────────────────────
     def _install_update(self, btn):
-        """Download tarball from GitHub, extract, and run install.sh via pkexec."""
-        if not getattr(self, '_latest_tarball_url', None):
-            self.update_status.set_label(f"{T('update_failed')}: No URL")
-            return
         self.install_btn.set_sensitive(False)
         self.download_btn.set_visible(False)
         self.update_btn.set_sensitive(False)
@@ -1031,105 +1080,16 @@ class SettingsPage(Gtk.Box):
         self.update_progress.set_fraction(0.0)
         self.update_progress.set_text(T("downloading_update"))
         self.update_status.set_label(T("downloading_update"))
-        threading.Thread(target=self._do_install_update, daemon=True).start()
-
-    def _do_install_update(self):
-        """Background: download → extract → pkexec install.sh."""
-        import urllib.request, tarfile
-        tmp_dir = None
-        try:
-            # Step 1: Download tarball
-            GLib.idle_add(self._install_progress, 0.1, T("downloading_update"))
-            tmp_dir = tempfile.mkdtemp(prefix="hp-manager-update-")
-            tarball_path = os.path.join(tmp_dir, "update.tar.gz")
-
-            req = urllib.request.Request(self._latest_tarball_url,
-                                         headers={"Accept": "application/vnd.github.v3+json"})
-            with urllib.request.urlopen(req, timeout=60) as resp:
-                total = int(resp.headers.get('Content-Length', 0))
-                downloaded = 0
-                with open(tarball_path, 'wb') as f:
-                    while True:
-                        chunk = resp.read(8192)
-                        if not chunk:
-                            break
-                        f.write(chunk)
-                        downloaded += len(chunk)
-                        if total > 0:
-                            pct = min(downloaded / total, 0.5)  # download = 0-50%
-                            GLib.idle_add(self._install_progress, pct, T("downloading_update"))
-
-            GLib.idle_add(self._install_progress, 0.5, T("installing_update"))
-
-            # Step 2: Extract tarball
-            with tarfile.open(tarball_path, 'r:gz') as tar:
-                try:
-                    tar.extractall(path=tmp_dir, filter='data')
-                except TypeError:
-                    # Python < 3.12: manually validate paths to prevent traversal
-                    abs_tmp = os.path.realpath(tmp_dir)
-                    for member in tar.getmembers():
-                        member_path = os.path.realpath(os.path.join(tmp_dir, member.name))
-                        if not member_path.startswith(abs_tmp + os.sep) and member_path != abs_tmp:
-                            raise ValueError(f"Path traversal detected in archive member: {member.name}")
-                    tar.extractall(path=tmp_dir)
-
-            # Find the extracted directory (GitHub tarballs have a single top-level dir)
-            extracted_dirs = [d for d in os.listdir(tmp_dir)
-                             if os.path.isdir(os.path.join(tmp_dir, d))]
-            if not extracted_dirs:
-                raise RuntimeError("No directory found in tarball")
-            src_dir = os.path.join(tmp_dir, extracted_dirs[0])
-
-            # Step 3: Run setup.sh update (or fallbacks) via pkexec
-            setup_script = os.path.join(src_dir, "setup.sh")
-            if os.path.exists(setup_script):
-                os.chmod(setup_script, 0o755)
-                cmd = ["pkexec", "bash", setup_script, "update"]
-            else:
-                # Fallback for older versions
-                install_script = os.path.join(src_dir, "update.sh")
-                if not os.path.exists(install_script):
-                    install_script = os.path.join(src_dir, "install.sh")
-                    if not os.path.exists(install_script):
-                        raise RuntimeError(f"setup.sh or update.sh not found in {src_dir}")
-                os.chmod(install_script, 0o755)
-                cmd = ["pkexec", "bash", install_script]
-
-            GLib.idle_add(self._install_progress, 0.6, T("installing_update"))
-
-            result = subprocess.run(
-                cmd,
-                cwd=src_dir,
-                capture_output=True, text=True, timeout=300
-            )
-
-            GLib.idle_add(self._install_progress, 0.95, T("installing_update"))
-
-            if result.returncode == 0:
-                GLib.idle_add(self._install_done, True, "")
-            else:
-                err = result.stderr.strip() or result.stdout.strip() or f"Exit code: {result.returncode}"
-                GLib.idle_add(self._install_done, False, err)
-
-        except Exception as e:
-            GLib.idle_add(self._install_done, False, str(e))
-        finally:
-            # Cleanup temp files
-            if tmp_dir and os.path.exists(tmp_dir):
-                try:
-                    shutil.rmtree(tmp_dir)
-                except Exception:
-                    pass
+        if not hasattr(self, 'updater'):
+            self.updater = OmenUpdater(APP_VERSION, T)
+        self.updater.install_update_async(self._install_progress, self._install_done)
 
     def _install_progress(self, fraction, text):
-        """Update progress bar from main thread."""
         self.update_progress.set_fraction(fraction)
         self.update_progress.set_text(text)
         return False
 
     def _install_done(self, success, error_msg):
-        """Handle install completion from main thread."""
         self.update_progress.set_fraction(1.0 if success else 0.0)
         self.update_progress.set_visible(False)
         self.install_btn.set_visible(False)
@@ -1145,50 +1105,14 @@ class SettingsPage(Gtk.Box):
         return False
 
     def _restart_app(self, btn):
-        """Restart the application after a successful update."""
-        import sys
-        python = sys.executable
-        script = os.path.abspath(sys.argv[0]) if sys.argv else ""
-        if script and os.path.exists(script):
-            subprocess.Popen([python, script])
         app = self.get_root()
         if app and hasattr(app, 'get_application'):
             application = app.get_application()
             if application:
                 application.quit()
-                return
-        # Fallback: just exit
-        sys.exit(0)
-
-    @staticmethod
-    def _version_compare(v1, v2):
-        """Compare two version strings (basic semantic).
-        Returns >0 if v1>v2, <0 if v1<v2, 0 if equal.
-        """
-        import re
-        def parse(v):
-            v = str(v).strip()
-            # extract dots and digits
-            m = re.match(r'^([\d.]+)', v)
-            if not m:
-                return [0]
-            return [int(x) for x in m.group(1).split('.') if x]
-        
-        n1 = parse(v1)
-        n2 = parse(v2)
-        
-        # pad to same length
-        maxlen = max(len(n1), len(n2))
-        n1.extend([0] * (maxlen - len(n1)))
-        n2.extend([0] * (maxlen - len(n2)))
-        
-        for a, b in zip(n1, n2):
-            if a > b:
-                return 1
-            if a < b:
-                return -1
-        return 0
-
+        if not hasattr(self, 'updater'):
+            self.updater = OmenUpdater(APP_VERSION, T)
+        self.updater.restart_app()
     # ── Theme / Lang ──────────────────────────────────────────────────────────
     def _on_theme(self, dd, _):
         idx = dd.get_selected()
@@ -1198,8 +1122,7 @@ class SettingsPage(Gtk.Box):
             self.on_theme_change(theme)
 
     def _on_lang(self, dd, _):
-        idx = dd.get_selected()
-        lang = "tr" if idx == 0 else "en" if idx == 1 else "hi"
+        lang = "tr" if dd.get_selected() == 0 else "en"
         if self.on_lang_change:
             self.on_lang_change(lang)
 
@@ -1254,178 +1177,65 @@ class SettingsPage(Gtk.Box):
             except Exception: pass
         return "Linux"
 
+
     def _copy_debug_log(self, btn):
+        btn.set_sensitive(False)
         def worker():
-            err_text = self._gather_debug_info()
-            GLib.idle_add(self._copy_done, err_text)
+            txt = generate_diagnostic_report(APP_VERSION, self._get_distro())
+            GLib.idle_add(self._copy_done, txt, btn)
+        import threading
         threading.Thread(target=worker, daemon=True).start()
 
-    def _copy_done(self, text):
-        self.get_clipboard().set(text)
-        old_text = self.copy_btn_label.get_label()
-        self.copy_btn_label.set_label(T("copied_to_clipboard"))
-        GLib.timeout_add(2000, lambda: self.copy_btn_label.set_label(old_text) or False)
+    def _copy_done(self, text, btn):
+        from gi.repository import Gdk
+        clipboard = Gdk.Display.get_default().get_clipboard()
+        clipboard.set_content(Gdk.ContentProvider.new_for_value(text))
+        btn.set_sensitive(True)
 
     def _show_debug_terminal(self, _):
-        # Diagnostic Console Window (pure GTK so it works even without libadwaita)
-        win = Gtk.Window(default_width=820, default_height=560, modal=True)
-        # Try to make it transient if roots are available
-        try:
-            root = self.get_root()
-            if root: win.set_transient_for(root)
-        except: pass
-
-        # Header bar — set as titlebar (replaces the default window title bar entirely)
-        header = Gtk.HeaderBar()
-        header.set_show_title_buttons(True)
-        header.set_title_widget(Gtk.Label(label=T("debug_console_title")))
-        win.set_titlebar(header)
-
-        main_vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        win.set_child(main_vbox)
-
-        # Scrolled Terminal
-        scrolled = Gtk.ScrolledWindow(vexpand=True)
-        text_view = Gtk.TextView(editable=False, margin_top=12, margin_bottom=12, margin_start=12, margin_end=12)
-        text_view.set_monospace(True)
-        text_view.add_css_class("debug-console")
-        scrolled.set_child(text_view)
-        main_vbox.append(scrolled)
-
-        buffer = text_view.get_buffer()
-        buffer.set_text(T("debug_collecting"))
-        
+        dialog = Gtk.Window(title="Diagnose & Check", transient_for=self.get_root(), modal=True)
+        dialog.set_default_size(800, 600)
+        scroll = Gtk.ScrolledWindow(hexpand=True, vexpand=True)
+        term = Gtk.TextView(editable=False, cursor_visible=False)
+        term.add_css_class("terminal-text")
+        term.set_margin_start(12)
+        term.set_margin_end(12)
+        term.set_margin_top(12)
+        term.set_margin_bottom(12)
+        buf = term.get_buffer()
+        scroll.set_child(term)
+        dialog.set_child(scroll)
+        dialog.present()
         def run_diag():
-            logs = self._gather_debug_info()
-            GLib.idle_add(lambda: buffer.set_text(logs))
-        
+            txt = generate_diagnostic_report(APP_VERSION, self._get_distro())
+            GLib.idle_add(lambda: buf.set_text(txt))
+        import threading
         threading.Thread(target=run_diag, daemon=True).start()
-        win.present()
 
-        
-    def _gather_debug_info(self):
-        import platform, subprocess, os, glob
-        out = [f"--- DEBUG INFO (v{APP_VERSION}) ---"]
-        
-        # 1. DMI Data
-        board_id = "Unknown"
-        try:
-            if os.path.exists("/sys/class/dmi/id/board_name"):
-                with open("/sys/class/dmi/id/board_name", "r") as f:
-                    board_id = f.read().strip()
-                out.append(f"Board ID: {board_id}")
-            if os.path.exists("/sys/class/dmi/id/product_name"):
-                with open("/sys/class/dmi/id/product_name", "r") as f:
-                    out.append(f"Product Name: {f.read().strip()}")
-        except: pass
-
-        # 2. WMI GUIDs
-        guids = {
-            "95F24279-4D7B-4334-9387-ACCDC67EF61C": "WMI EVENT GUID",
-            "5FB7F034-2C63-45E9-BE91-3D44E2C707E4": "WMI BIOS GUID"
-        }
-        for guid, name in guids.items():
-            found = False
-            if os.path.exists("/sys/bus/wmi/devices/"):
-                for d in os.listdir("/sys/bus/wmi/devices/"):
-                    if guid.lower() in d.lower():
-                        found = True
-                        break
-            out.append(f"{name}: {'Found' if found else 'Not Found'}")
-
-        # 3. Platform Profile
-        pp_path = "/sys/firmware/acpi/platform_profile"
-        if os.path.exists(pp_path):
-            out.append(f"Platform Profile Path: {pp_path}")
+    def _create_github_issue(self, btn):
+        btn.set_sensitive(False)
+        old_label = btn.get_child().get_label() if btn.get_child() else "Create Issue"
+        if btn.get_child(): btn.get_child().set_label("Gathering info...")
+        def _worker():
             try:
-                with open(pp_path, "r") as f:
-                    out.append(f"Active Profile: {f.read().strip()}")
-            except: out.append("Active Profile: Read Error")
-        else:
-            out.append("Platform Profile: Not Supported")
-
-        # 4. Thermal Version (Heuristic)
-        v1_boards = ["8BAB", "8BCD", "8C77", "8E35", "8C78", "8C99", "8C9C", "8D41", "8BBE", "8BD4", "8BD5"] 
-        if board_id in v1_boards or os.path.exists(pp_path):
-            out.append("Thermal Version: 1 (Detected via DMI/Platform Profile)")
-        else:
-            out.append("Thermal Version: 0 (Legacy or Unknown)")
-
-        # 5. Hwmon / Fans
-        hwmon_found = False
-        for hdir in glob.glob("/sys/class/hwmon/hwmon*"):
-            try:
-                with open(os.path.join(hdir, "name"), "r") as f:
-                    if f.read().strip() == "hp":
-                        hwmon_found = True
-                        out.append(f"Hwmon Path: {hdir} (hp)")
-                        for fan_path in sorted(glob.glob(os.path.join(hdir, "fan*_input"))):
-                            fname = os.path.basename(fan_path)
-                            fnum = fname.split("_")[0].replace("fan", "")
-                            try:
-                                with open(fan_path, "r") as ff:
-                                    out.append(f"Fan {fnum} Speed: {ff.read().strip()} RPM")
-                            except: pass
-                        pwm_file = os.path.join(hdir, "pwm_enable")
-                        if os.path.exists(pwm_file):
-                            try:
-                                with open(pwm_file, "r") as pf:
-                                    out.append(f"PWM Control: {pf.read().strip()}")
-                            except: pass
-                        break
-            except: continue
-        if not hwmon_found:
-            out.append("Hwmon (hp): Not Found")
-
-        # 6. Kernel Modules
-        out.append("\nLoaded Modules:")
-        try:
-            lsmod_out = subprocess.check_output(["lsmod"], stderr=subprocess.DEVNULL, timeout=2).decode(errors='ignore')
-            for mod in ('hp_wmi', 'hp_rgb_lighting'):
-                out.append(f"  - {mod}: {'Yes' if mod in lsmod_out else 'No'}")
-        except: pass
-
-        # 7. Service Status
-        out.append("\nService Status:")
-        for svc_name in ("hpm-fan", "hpm-rgb", "hpm-power", "hpm-mux", "hpm-platform"):
-            try:
-                status = subprocess.check_output(
-                    ["systemctl", "is-active", f"{svc_name}.service"],
-                    stderr=subprocess.DEVNULL, timeout=2
-                ).decode(errors='ignore').strip()
-                out.append(f"  {svc_name}: {status}")
-            except subprocess.CalledProcessError as e:
-                out.append(f"  {svc_name}: {e.output.decode(errors='ignore').strip() if e.output else 'inactive'}")
+                diag = generate_github_issue_body(APP_VERSION, self._get_distro())
+                GLib.idle_add(self._open_github_issue, diag, old_label, btn)
             except Exception as e:
-                out.append(f"  {svc_name}: Error ({e})")
+                GLib.idle_add(self._github_issue_error, str(e), old_label, btn)
+        import threading
+        threading.Thread(target=_worker, daemon=True).start()
 
-        # 8. Kernel Logs (dmesg)
-        out.append("\nKernel Logs:")
-        try:
-            import re as _re
-            _log_pattern = _re.compile(r'hp_wmi|wmi|hp-manager', _re.IGNORECASE)
-            try:
-                dmesg_out = subprocess.check_output(['dmesg'], stderr=subprocess.DEVNULL, timeout=3).decode(errors='ignore')
-                log_lines = [l for l in dmesg_out.splitlines() if _log_pattern.search(l)][-10:]
-                logs = '\n'.join(log_lines)
-            except Exception:
-                logs = ''
-            if not logs.strip():
-                try:
-                    journal_out = subprocess.check_output(
-                        ['journalctl', '-k', '--no-pager'],
-                        stderr=subprocess.DEVNULL, timeout=3
-                    ).decode(errors='ignore')
-                    log_lines = [l for l in journal_out.splitlines() if _log_pattern.search(l)][-10:]
-                    logs = '\n'.join(log_lines)
-                except Exception:
-                    logs = ''
-            
-            if logs.strip():
-                out.append(logs.strip())
-            else:
-                out.append("No relevant logs found.")
-        except:
-            out.append("Could not access dmesg/journal (insufficient permissions).")
+    def _open_github_issue(self, diag, old_label, btn):
+        import urllib.parse
+        import subprocess
+        title = urllib.parse.quote(diag["title"])
+        body = urllib.parse.quote(diag["body"])
+        url = f"https://github.com/yunusemreyl/OmenCtl/issues/new?title={title}&body={body}"
+        subprocess.Popen(["xdg-open", url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if btn.get_child(): btn.get_child().set_label(old_label)
+        btn.set_sensitive(True)
 
-        return "\n".join(out)
+    def _github_issue_error(self, error_msg, old_label, btn):
+        if btn.get_child(): btn.get_child().set_label(old_label)
+        btn.set_sensitive(True)
+        print(f"Error creating GitHub issue: {error_msg}")

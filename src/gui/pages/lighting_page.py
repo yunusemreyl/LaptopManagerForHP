@@ -20,7 +20,9 @@ def T(k):
 
 
 def _detect_model_type():
-    for dmi_file in ("/sys/devices/virtual/dmi/id/product_name",
+    for dmi_file in ("/sys/class/dmi/id/product_name",
+                     "/sys/class/dmi/id/product_family",
+                     "/sys/devices/virtual/dmi/id/product_name",
                      "/sys/devices/virtual/dmi/id/product_family"):
         try:
             if os.path.exists(dmi_file):
@@ -82,8 +84,6 @@ class LightingPage(Gtk.Box):
 
     def _sync_state(self):
         if not self.service:
-            if not os.path.exists("/sys/module/hp_rgb_lighting"):
-                GLib.idle_add(self.view_stack.set_visible_child_name, "unsupported")
             return
         
         # Run DBus call in background to avoid freezing the UI transition
@@ -98,25 +98,19 @@ class LightingPage(Gtk.Box):
 
     def _apply_state(self, st):
         try:
-            rgb_available = st.get("rgb_available", True)
-            rgb_supported = st.get("rgb_supported", True)
-            brightness_supported = st.get("brightness_supported", True)
+            # If the daemon reports the RGB driver is not available, show a
+            # clear banner and disable controls — avoids a silent no-op UI.
+            driver_active = st.get("driver_active", not st.get("unsupported", False))
+            if not driver_active:
+                reason = st.get(
+                    "unavailable_reason",
+                    T("rgb_driver_unavailable") if hasattr(self, "_rgb_unavail_banner") else
+                    "RGB kernel module not loaded (hp_rgb_lighting / omen-rgb-keyboard)."
+                )
+                self._show_unavailable_banner(reason)
+                return
 
-            if not rgb_available and not brightness_supported:
-                self.view_stack.set_visible_child_name("unsupported")
-                return False
-            else:
-                self.view_stack.set_visible_child_name("supported")
-
-            # Show/hide widgets based on RGB support
-            self.preview_frame.set_visible(rgb_supported)
-            if hasattr(self, "zone_box") and self.zone_box:
-                self.zone_box.set_visible(rgb_supported)
-            self.color_separator.set_visible(rgb_supported)
-            self.color_box.set_visible(rgb_supported)
-            self.effects_separator.set_visible(rgb_supported)
-            self._effects_grid.set_visible(rgb_supported)
-            self.status_box.set_visible(not rgb_supported)
+            self._hide_unavailable_banner()
 
             self.power = st.get("power", True)
             self.mode = st.get("mode", "static")
@@ -128,50 +122,63 @@ class LightingPage(Gtk.Box):
             self.brightness_scale.set_value(self.brightness)
             self.speed_scale.set_value(self.speed)
 
-            if not rgb_supported:
-                self.status_note.set_label(T("backlight_note"))
-                if self.power:
-                    self.status_lbl.set_label(T("backlight_active"))
-                    self.status_icon.set_opacity(1.0)
-                    self.status_icon.add_css_class("keyboard-active")
-                else:
-                    self.status_lbl.set_label(T("backlight_off"))
-                    self.status_icon.set_opacity(0.4)
-                    self.status_icon.remove_css_class("keyboard-active")
-            else:
-                modes = ["static", "breathing", "wave", "cycle"]
-                if self.mode in modes:
-                    self.mode_dd.set_selected(modes.index(self.mode))
+            modes = ["static", "breathing", "wave", "cycle", "rainbow", "pulse", "chase", "sparkle", "candle", "aurora", "disco", "gradient"]
+            if self.mode in modes:
+                self.mode_dd.set_selected(modes.index(self.mode))
 
-                self.dir_dd.set_selected(0 if self.direction == "ltr" else 1)
+            self.dir_dd.set_selected(0 if self.direction == "ltr" else 1)
 
-                colors = st.get("colors", ["FF0000"] * 8)
-                for i in range(min(len(colors), 8)):
-                    c = Gdk.RGBA()
-                    c.parse(f"#{colors[i]}")
-                    self.zone_rgba[i] = c
-                    self.kb_preview.set_zone_color(i, c.red, c.green, c.blue, redraw=False)
+            colors = st.get("colors", ["FF0000"] * 8)
+            for i in range(min(len(colors), 8)):
+                c = Gdk.RGBA()
+                c.parse(f"#{colors[i]}")
+                self.zone_rgba[i] = c
+                self.kb_preview.set_zone_color(i, c.red, c.green, c.blue, redraw=False)
 
-                self.kb_preview.power = self.power
-                self.kb_preview.mode = self.mode
-                self.kb_preview.speed = self.speed
-                self.kb_preview.brightness = self.brightness
-                self.kb_preview.direction = self.direction
-                self.kb_preview.queue_draw()
-        except Exception: pass
+            self.kb_preview.power = self.power
+            self.kb_preview.mode = self.mode
+            self.kb_preview.speed = self.speed
+            self.kb_preview.brightness = self.brightness
+            self.kb_preview.direction = self.direction
+            self.kb_preview.queue_draw()
+        except Exception:
+            pass
         return False
+
+    def _show_unavailable_banner(self, reason):
+        if hasattr(self, "_rgb_unavail_banner") and self._rgb_unavail_banner is not None:
+            self._rgb_unavail_label.set_text(reason)
+            return
+        banner = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        banner.add_css_class("card")
+        icon = Gtk.Label(label="⚠")
+        icon.add_css_class("section-title")
+        banner.append(icon)
+        lbl = Gtk.Label(label=reason, wrap=True, xalign=0)
+        lbl.add_css_class("stat-lbl")
+        banner.append(lbl)
+        self._rgb_unavail_banner = banner
+        self._rgb_unavail_label = lbl
+        self._content_box.prepend(banner)
+        # Dim the controls to signal they are non-functional
+        self._controls_card.set_sensitive(False)
+        self._controls_card.set_opacity(0.4)
+
+    def _hide_unavailable_banner(self):
+        if hasattr(self, "_rgb_unavail_banner") and self._rgb_unavail_banner is not None:
+            self._content_box.remove(self._rgb_unavail_banner)
+            self._rgb_unavail_banner = None
+            self._rgb_unavail_label = None
+        self._controls_card.set_sensitive(True)
+        self._controls_card.set_opacity(1.0)
+
+
 
     def _build_ui(self):
         title = Gtk.Label(label=T("keyboard_lighting"), xalign=0)
         title.add_css_class("page-title")
         self.append(title)
 
-        self.view_stack = Gtk.Stack()
-        self.view_stack.set_transition_type(Gtk.StackTransitionType.CROSSFADE)
-        self.view_stack.set_transition_duration(150)
-        self.append(self.view_stack)
-
-        # ─── 1. Supported View ───
         scroll = Gtk.ScrolledWindow(vexpand=True)
         scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=20)
@@ -183,13 +190,10 @@ class LightingPage(Gtk.Box):
         self.kb_preview = KeyboardPreview()
         preview_frame.append(self.kb_preview)
         content.append(preview_frame)
-        self.preview_frame = preview_frame
 
         # Zone Selection (Omen only)
-        self.zone_box = None
         if self.num_zones == 4:
             zone_box = Gtk.Box(spacing=8, halign=Gtk.Align.CENTER)
-            self.zone_box = zone_box
             self.zone_group = None
             zones = [f"{T('zone')} {i+1}" for i in range(4)] + [T("all_zones")]
             for i, label in enumerate(zones):
@@ -206,28 +210,6 @@ class LightingPage(Gtk.Box):
                 self._zone_buttons.append(btn)
             content.append(zone_box)
 
-        # Backlight status box (for non-RGB keyboards)
-        status_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12, halign=Gtk.Align.CENTER)
-        status_box.set_margin_top(20)
-        status_box.set_margin_bottom(20)
-        
-        self.status_icon = Gtk.Image.new_from_icon_name("input-keyboard-symbolic")
-        self.status_icon.set_pixel_size(64)
-        self.status_icon.add_css_class("dim-label")
-        status_box.append(self.status_icon)
-        
-        self.status_lbl = Gtk.Label(label="", css_classes=["title-4"])
-        status_box.append(self.status_lbl)
-        
-        self.status_note = Gtk.Label(label="", css_classes=["dim-label"])
-        self.status_note.set_wrap(True)
-        self.status_note.set_max_width_chars(50)
-        self.status_note.set_justify(Gtk.Justification.CENTER)
-        status_box.append(self.status_note)
-        
-        self.status_box = status_box
-        content.append(status_box)
-
         # Controls Card
         card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=20)
         card.add_css_class("card")
@@ -242,11 +224,9 @@ class LightingPage(Gtk.Box):
         power_box.append(self.sw)
         row1.append(power_box)
 
-        self.color_separator = Gtk.Separator(orientation=Gtk.Orientation.VERTICAL)
-        row1.append(self.color_separator)
+        row1.append(Gtk.Separator(orientation=Gtk.Orientation.VERTICAL))
 
         color_box = Gtk.Box(spacing=6, halign=Gtk.Align.CENTER)
-        self.color_box = color_box
         
         # We need a CSS provider to inject dynamic CSS for glows
         self.preset_css_provider = Gtk.CssProvider()
@@ -278,15 +258,6 @@ class LightingPage(Gtk.Box):
                 box-shadow: 0px 0px 14px {hex_color}, inset 0px 0px 4px rgba(255,255,255,0.6);
             }}
             """
-        
-        # Add a custom class for the keyboard status icon glow
-        dyn_css += """
-        .keyboard-active {
-            color: #3583e4;
-            filter: drop-shadow(0px 0px 8px #3583e4);
-            transition: all 0.3s ease;
-        }
-        """
             
         self.preset_css_provider.load_from_data(dyn_css.encode('utf-8'))
 
@@ -300,14 +271,16 @@ class LightingPage(Gtk.Box):
         card.append(row1)
         self._controls_card = card
 
-        self.effects_separator = Gtk.Separator()
-        card.append(self.effects_separator)
+        card.append(Gtk.Separator())
 
         # Effect controls
         grid = Gtk.Grid(column_spacing=30, row_spacing=15, halign=Gtk.Align.CENTER)
 
         grid.attach(Gtk.Label(label=T("effect"), xalign=1, css_classes=["section-title"]), 0, 0, 1, 1)
-        self.mode_dd = Gtk.DropDown(model=Gtk.StringList.new([T("static_eff"), T("breathing"), T("wave"), T("cycle")]))
+        self.mode_dd = Gtk.DropDown(model=Gtk.StringList.new([
+            T("static_eff"), T("breathing"), T("wave"), T("cycle"),
+            "Rainbow", "Pulse", "Chase", "Sparkle", "Candle", "Aurora", "Disco", "Gradient"
+        ]))
         self.mode_dd.connect("notify::selected", self._on_mode)
         grid.attach(self.mode_dd, 1, 0, 1, 1)
 
@@ -338,38 +311,18 @@ class LightingPage(Gtk.Box):
         content.append(card)
 
         scroll.set_child(content)
-        self.view_stack.add_named(scroll, "supported")
+        self.append(scroll)
 
-        # ─── 2. Unsupported View ───
-        unsupported_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=24, valign=Gtk.Align.CENTER, halign=Gtk.Align.CENTER)
-        unsupported_box.set_vexpand(True)
-        unsupported_box.set_hexpand(True)
-        unsupported_box.add_css_class("card")
-        unsupported_box.set_margin_start(40)
-        unsupported_box.set_margin_end(40)
-        unsupported_box.set_margin_top(40)
-        unsupported_box.set_margin_bottom(40)
+        # Subtle developer signature
+        sig = Gtk.Label(label="developed by omenlinux.alessandromarcon.dev")
+        sig.set_opacity(0.18)
+        sig.set_halign(Gtk.Align.END)
+        sig.set_margin_end(8)
+        sig.set_margin_bottom(4)
+        sig.add_css_class("stat-lbl")
+        self.append(sig)
+        self._signature_label = sig
 
-        # Large icon
-        icon = Gtk.Image.new_from_icon_name("input-keyboard-symbolic")
-        icon.set_pixel_size(64)
-        icon.add_css_class("dim-label")
-        unsupported_box.append(icon)
-
-        # Title
-        unsupported_title = Gtk.Label(label=T("rgb_not_supported"), css_classes=["title-2"])
-        unsupported_box.append(unsupported_title)
-
-        # Description
-        unsupported_desc = Gtk.Label(label=T("rgb_not_supported_desc"), css_classes=["dim-label"])
-        unsupported_desc.set_wrap(True)
-        unsupported_desc.set_max_width_chars(50)
-        unsupported_desc.set_justify(Gtk.Justification.CENTER)
-        unsupported_box.append(unsupported_desc)
-
-        self.view_stack.add_named(unsupported_box, "unsupported")
-
-        self.view_stack.set_visible_child_name("supported")
         self.set_ui_scale("normal")
 
     def set_ui_scale(self, bucket, _width=0, _height=0):
@@ -416,6 +369,10 @@ class LightingPage(Gtk.Box):
             grid.set_column_spacing(18 if bucket == "compact" else 36 if bucket == "spacious" else 30)
             grid.set_row_spacing(12 if bucket == "compact" else 18 if bucket == "spacious" else 15)
 
+        sig = getattr(self, "_signature_label", None)
+        if sig is not None:
+            sig.set_margin_end(6 if bucket == "compact" else 10 if bucket == "spacious" else 8)
+
     def _on_zone_select(self, zone):
         self.selected_zone = zone
 
@@ -459,8 +416,36 @@ class LightingPage(Gtk.Box):
         self.kb_preview.queue_draw()
 
     def _open_picker(self, btn):
-        dialog = Gtk.ColorDialog()
-        dialog.choose_rgba(self.get_root(), None, None, self._on_color_picked)
+        # Gtk.ColorDialog was added in GTK 4.10. Fall back to the deprecated
+        # Gtk.ColorChooserDialog on older GTK (e.g. Ubuntu 26.04 / GNOME 50).
+        gtk_minor = Gtk.get_minor_version()
+        if gtk_minor >= 10 and hasattr(Gtk, "ColorDialog"):
+            dialog = Gtk.ColorDialog()
+            dialog.choose_rgba(self.get_root(), None, None, self._on_color_picked)
+        else:
+            # Legacy fallback: Gtk.ColorChooserDialog (synchronous)
+            try:
+                root = self.get_root()
+                dialog = Gtk.ColorChooserDialog(title="Pick a colour", transient_for=root)
+                dialog.set_use_alpha(False)
+                dialog.connect("response", self._on_legacy_color_response)
+                dialog.present()
+            except Exception as e:
+                print(f"ColorChooserDialog failed: {e}")
+
+    def _on_legacy_color_response(self, dialog, response_id):
+        try:
+            if response_id == Gtk.ResponseType.OK:
+                c = dialog.get_rgba()
+                hex_color = f"#{int(c.red * 255):02X}{int(c.green * 255):02X}{int(c.blue * 255):02X}"
+                self._on_color(hex_color)
+        except Exception:
+            pass
+        finally:
+            dialog.destroy()
+            root = self.get_root()
+            if root:
+                root.present()
 
     def _on_color_picked(self, dialog, result):
         try:
@@ -475,7 +460,7 @@ class LightingPage(Gtk.Box):
                 root.present()
 
     def _on_mode(self, dd, _):
-        modes = ["static", "breathing", "wave", "cycle"]
+        modes = ["static", "breathing", "wave", "cycle", "rainbow", "pulse", "chase", "sparkle", "candle", "aurora", "disco", "gradient"]
         self.mode = modes[dd.get_selected()]
         self.kb_preview.mode = self.mode
         self.kb_preview.queue_draw()

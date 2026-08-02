@@ -2,7 +2,9 @@ import os
 
 def detect_model_type() -> str:
     """Detects if the system is an OMEN or Victus based on DMI info."""
-    for dmi_file in ("/sys/devices/virtual/dmi/id/product_name",
+    for dmi_file in ("/sys/class/dmi/id/product_name",
+                     "/sys/class/dmi/id/product_family",
+                     "/sys/devices/virtual/dmi/id/product_name",
                      "/sys/devices/virtual/dmi/id/product_family"):
         try:
             if os.path.exists(dmi_file):

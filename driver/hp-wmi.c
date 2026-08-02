@@ -42,9 +42,13 @@ MODULE_LICENSE("GPL");
 
 MODULE_ALIAS("wmi:95F24279-4D7B-4334-9387-ACCDC67EF61C");
 MODULE_ALIAS("wmi:5FB7F034-2C63-45E9-BE91-3D44E2C707E4");
+MODULE_ALIAS("wmi:1F4C91EB-DC5C-460B-951D-C7CB9B4B8D5E");
 
 #define HPWMI_EVENT_GUID "95F24279-4D7B-4334-9387-ACCDC67EF61C"
 #define HPWMI_BIOS_GUID  "5FB7F034-2C63-45E9-BE91-3D44E2C707E4"
+#define HPWMI_OMEN_HPC_GUID "1F4C91EB-DC5C-460B-951D-C7CB9B4B8D5E"
+
+static const char *active_bios_guid = HPWMI_BIOS_GUID;
 
 enum hp_ec_offsets {
 	HP_EC_OFFSET_UNKNOWN                    = 0x00,
@@ -116,6 +120,13 @@ static const struct thermal_profile_params victus_s_thermal_params = {
 	.ec_tp_offset = HP_EC_OFFSET_UNKNOWN,
 };
 
+static const struct thermal_profile_params victus_s_known_ec_thermal_params = {
+	.performance  = HP_VICTUS_S_THERMAL_PROFILE_PERFORMANCE,
+	.balanced     = HP_VICTUS_S_THERMAL_PROFILE_DEFAULT,
+	.low_power    = HP_VICTUS_S_THERMAL_PROFILE_DEFAULT,
+	.ec_tp_offset = HP_VICTUS_S_EC_THERMAL_PROFILE_OFFSET,
+};
+
 static const struct thermal_profile_params omen_v1_thermal_params = {
 	.performance  = HP_OMEN_V1_THERMAL_PROFILE_PERFORMANCE,
 	.balanced     = HP_OMEN_V1_THERMAL_PROFILE_DEFAULT,
@@ -167,7 +178,7 @@ static const char *const omen_thermal_profile_boards[] = {
 	"878A", "878B", "878C", "87B5", "886B", "886C", "88C8", "88CB",
 	"88D1", "88D2", "88F4", "88F5", "88F6", "88F7", "88FD", "88FE",
 	"88FF", "8900", "8901", "8902", "8912", "8917", "8918", "8949",
-	"894A", "89EB", "8A15", "8A42", "8BAD", "8C58", "8E41",
+	"894A", "89EB", "8A15", "8A18", "8A42", "8A43", "8BAD", "8C58", "8E41",
 	/*
 	 * FIX: 8D41 (HP Omen Max), 8BAC (HP Omen 16-wf0xxx), 8BA9, 8E35,
 	 * 8C77, 8BCD removed from this list so they fall through to the
@@ -268,7 +279,7 @@ static const struct dmi_system_id victus_s_thermal_profile_boards[] __initconst 
 	},
 	{
 		.matches    = {DMI_MATCH(DMI_BOARD_NAME, "8C99")},
-		.driver_data = (void *)&victus_s_thermal_params,
+		.driver_data = (void *)&victus_s_known_ec_thermal_params,
 	},
 	{
 		.matches    = {DMI_MATCH(DMI_BOARD_NAME, "8C9C")},
@@ -283,7 +294,15 @@ static const struct dmi_system_id victus_s_thermal_profile_boards[] __initconst 
 		.driver_data = (void *)&omen_v1_no_ec_thermal_params,
 	},
 	{
+		.matches    = {DMI_MATCH(DMI_BOARD_NAME, "8D42")},
+		.driver_data = (void *)&omen_v1_no_ec_thermal_params,
+	},
+	{
 		.matches    = {DMI_MATCH(DMI_BOARD_NAME, "8D87")},
+		.driver_data = (void *)&omen_v1_no_ec_thermal_params,
+	},
+	{
+		.matches    = {DMI_MATCH(DMI_BOARD_NAME, "8D88")},
 		.driver_data = (void *)&omen_v1_no_ec_thermal_params,
 	},
 	{
@@ -553,6 +572,7 @@ struct hp_wmi_hwmon_priv {
 	u8  prev_mode;
 	u8  pwm;
 	bool fan_speed_available; /* true only when fan table query succeeded */
+	bool uses_victus_s_fan_commands;
 	struct delayed_work keep_alive_dwork;
 	/*
 	 * Protects mode, prev_mode, target_rpms, pwm, and serialises
@@ -640,93 +660,100 @@ DEFINE_MUTEX(hp_wmi_mutex);
 EXPORT_SYMBOL_GPL(hp_wmi_mutex);
 
 static int hp_wmi_perform_query(int query, enum hp_wmi_command command,
-				void *buffer, int insize, int outsize)
+                            void *buffer, int insize, int outsize)
 {
-	struct acpi_buffer input, output = {ACPI_ALLOCATE_BUFFER, NULL};
-	struct bios_return *bios_return;
-	union acpi_object *obj = NULL;
-	struct bios_args *args = NULL;
-	int mid, actual_insize, actual_outsize;
-	size_t bios_args_size;
-	int ret;
+        struct acpi_buffer input, output = {ACPI_ALLOCATE_BUFFER, NULL};
+        struct bios_return *bios_return;
+        union acpi_object *obj = NULL;
+        struct bios_args *args = NULL;
+        int mid, actual_insize, actual_outsize;
+        size_t bios_args_size;
+        int ret;
+        bool retried = false;
 
-	mid = encode_outsize_for_pvsz(outsize);
-	if (WARN_ON(mid < 0))
-		return mid;
+        mid = encode_outsize_for_pvsz(outsize);
+        if (WARN_ON(mid < 0))
+                return mid;
 
-	actual_insize = max(insize, 128);
-	bios_args_size = struct_size(args, data, actual_insize);
-	args = kzalloc(bios_args_size, GFP_KERNEL);
-	if (!args)
-		return -ENOMEM;
+        actual_insize = max(insize, 128);
+        bios_args_size = struct_size(args, data, actual_insize);
+        args = kzalloc(bios_args_size, GFP_KERNEL);
+        if (!args)
+                return -ENOMEM;
 
-	input.length  = bios_args_size;
-	input.pointer = args;
+        input.length  = bios_args_size;
+        input.pointer = args;
 
-	args->signature   = 0x55434553;
-	args->command     = command;
-	args->commandtype = query;
-	/*
-	 * Older firmware requires datasize == 1 even when there is no real
-	 * payload; kzalloc above guarantees data[0] == 0 in that case.
-	 */
-	args->datasize = (insize == 0 && !zero_insize_support) ? 4 : insize;
+        args->signature   = 0x55434553;
+        args->command     = command;
+        args->commandtype = query;
+        args->datasize = (insize == 0 && !zero_insize_support) ? 4 : insize;
 
-	if (insize > 0)
-		memcpy(args->data, buffer, flex_array_size(args, data, insize));
+        if (insize > 0)
+                memcpy(args->data, buffer, flex_array_size(args, data, insize));
 
-	mutex_lock(&hp_wmi_mutex);
-	ret = wmi_evaluate_method(HPWMI_BIOS_GUID, 0, mid, &input, &output);
-	mutex_unlock(&hp_wmi_mutex);
-	if (ret)
-		goto out_free;
+retry:
+        mutex_lock(&hp_wmi_mutex);
+        ret = wmi_evaluate_method(retried ? HPWMI_BIOS_GUID : active_bios_guid, 0, mid, &input, &output);
+        mutex_unlock(&hp_wmi_mutex);
 
-	obj = output.pointer;
-	if (!obj) {
-		ret = -EINVAL;
-		goto out_free;
-	}
+        if (ret)
+                goto check_retry;
 
-	if (obj->type != ACPI_TYPE_BUFFER) {
-		pr_warn("query 0x%x returned an invalid object type 0x%x\n",
-			query, obj->type);
-		ret = -EINVAL;
-		goto out_free;
-	}
+        obj = output.pointer;
+        if (!obj) {
+                ret = -EINVAL;
+                goto check_retry;
+        }
 
-	/* Validate buffer before any dereference */
-	if (!obj->buffer.pointer ||
-	    obj->buffer.length < sizeof(*bios_return)) {
-		pr_warn("query 0x%x returned invalid buffer (ptr=%p len=%u)\n",
-			query, obj->buffer.pointer, obj->buffer.length);
-		ret = -EINVAL;
-		goto out_free;
-	}
+        if (obj->type != ACPI_TYPE_BUFFER) {
+                ret = -EINVAL;
+                goto check_retry;
+        }
 
-	bios_return = (struct bios_return *)obj->buffer.pointer;
-	ret = bios_return->return_code;
+        if (!obj->buffer.pointer || obj->buffer.length < sizeof(*bios_return)) {
+                ret = -EINVAL;
+                goto check_retry;
+        }
 
-	if (ret) {
-		if (ret != HPWMI_RET_UNKNOWN_COMMAND &&
-		    ret != HPWMI_RET_UNKNOWN_CMDTYPE)
-			pr_warn("query 0x%x returned error 0x%x\n", query, ret);
-		goto out_free;
-	}
+        bios_return = (struct bios_return *)obj->buffer.pointer;
+        ret = bios_return->return_code;
 
-	/* Ignore output data of zero size */
-	if (!outsize)
-		goto out_free;
+check_retry:
+        if (ret) {
+                if (!retried && !strcmp(active_bios_guid, HPWMI_OMEN_HPC_GUID)) {
+                        kfree(output.pointer);
+                        output.pointer = NULL;
+                        output.length = ACPI_ALLOCATE_BUFFER;
+                        retried = true;
+                        goto retry;
+                }
 
-	actual_outsize = min(outsize,
-			     (int)(obj->buffer.length - sizeof(*bios_return)));
-	memcpy(buffer, obj->buffer.pointer + sizeof(*bios_return),
-	       actual_outsize);
-	memset(buffer + actual_outsize, 0, outsize - actual_outsize);
+                if (obj) {
+                        if (obj->type != ACPI_TYPE_BUFFER) {
+                                pr_warn("query 0x%x returned an invalid object type 0x%x\n", query, obj->type);
+                        } else if (!obj->buffer.pointer || obj->buffer.length < sizeof(*bios_return)) {
+                                pr_warn("query 0x%x returned invalid buffer (ptr=%p len=%u)\n", query, obj->buffer.pointer, obj->buffer.length);
+                        } else if (ret != HPWMI_RET_UNKNOWN_COMMAND && ret != HPWMI_RET_UNKNOWN_CMDTYPE) {
+                                pr_warn("query 0x%x returned error 0x%x\n", query, ret);
+                        }
+                }
+                goto out_free;
+        }
+
+        if (!outsize)
+                goto out_free;
+
+        actual_outsize = min(outsize,
+                             (int)(obj->buffer.length - sizeof(*bios_return)));
+        memcpy(buffer, obj->buffer.pointer + sizeof(*bios_return),
+               actual_outsize);
+        memset(buffer + actual_outsize, 0, outsize - actual_outsize);
 
 out_free:
-	kfree(obj);
-	kfree(args);
-	return ret;
+        kfree(output.pointer);
+        kfree(args);
+        return ret;
 }
 
 /*
@@ -937,33 +964,51 @@ static int hp_wmi_fan_speed_set(struct hp_wmi_hwmon_priv *priv,
 				    HPWMI_GM, &fan_speed, sizeof(fan_speed), 0);
 }
 
+static bool is_victus_thermal_profile(void);
+static bool is_victus_s_thermal_profile(void);
+static int platform_profile_omen_set_ec(enum platform_profile_option profile);
+static int platform_profile_victus_set_ec(enum platform_profile_option profile);
+static int platform_profile_victus_s_set_ec(enum platform_profile_option profile);
+static int thermal_profile_get(void);
+static int thermal_profile_set(int thermal_profile);
+
 /*
  * hp_wmi_fan_speed_reset - hand fan control back to the EC.
  *
- * Disables max-fan mode, then sends 0 RPM so the EC resumes automatic
- * control.  Intentionally does NOT call
- * hp_wmi_get_fan_count_userdefine_trigger() so that we do not
- * accidentally re-enter user-defined mode while trying to leave it.
+ * Disables max-fan mode, then re-applies the active platform profile so the EC
+ * instantly resumes automatic control without waiting for the watchdog timeout.
  */
 static int hp_wmi_fan_speed_reset(struct hp_wmi_hwmon_priv *priv)
 {
-	u8 fan_speed[2] = {0, 0};
 	int ret;
 
 	ret = hp_wmi_fan_speed_max_set(0);
 	if (ret)
 		return ret;
 
-	/*
-	 * On Victus S-series the EC requires an explicit zero-RPM command to
-	 * resume automatic control.  On other devices only clearing the max-fan
-	 * flag is sufficient; sending the victus_s command would fail.
-	 */
 	if (!priv->fan_speed_available)
 		return 0;
 
-	return hp_wmi_perform_query(HPWMI_VICTUS_S_FAN_SPEED_SET_QUERY,
-				    HPWMI_GM, &fan_speed, sizeof(fan_speed), 0);
+	/*
+	 * Previously, an explicit zero-RPM command (HPWMI_VICTUS_S_FAN_SPEED_SET_QUERY)
+	 * was sent here. However, sending {0, 0} causes the EC to remain in manual mode
+	 * at 0 RPM for up to 120 seconds until the internal watchdog times out, leaving
+	 * the fans completely stopped even under heavy load.
+	 *
+	 * To force the EC to instantly release manual override and resume automatic
+	 * fan control without waiting for the watchdog timeout, we re-apply the active
+	 * thermal profile via HPWMI_SET_PERFORMANCE_MODE.
+	 */
+	if (is_omen_thermal_profile())
+		platform_profile_omen_set_ec(active_platform_profile);
+	else if (is_victus_thermal_profile())
+		platform_profile_victus_set_ec(active_platform_profile);
+	else if (is_victus_s_thermal_profile())
+		platform_profile_victus_s_set_ec(active_platform_profile);
+	else
+		thermal_profile_set(thermal_profile_get());
+
+	return 0;
 }
 
 /*
@@ -2756,7 +2801,7 @@ static umode_t hp_wmi_hwmon_is_visible(const void *data,
 	case hwmon_fan:
 		if (attr == hwmon_fan_input) {
 			if (priv->fan_speed_available) {
-				if (hp_wmi_get_fan_speed_victus_s(channel) >= 0)
+				if (priv->uses_victus_s_fan_commands ? (hp_wmi_get_fan_speed_victus_s(channel) >= 0) : (hp_wmi_get_fan_speed(channel) >= 0))
 					return 0444;
 			} else {
 				if (hp_wmi_get_fan_speed(channel) >= 0)
@@ -2791,7 +2836,7 @@ static int hp_wmi_hwmon_read(struct device *dev, enum hwmon_sensor_types type,
 			break;
 		}
 		if (attr == hwmon_fan_input) {
-			rpm = priv->fan_speed_available
+			rpm = (priv->fan_speed_available && priv->uses_victus_s_fan_commands)
 			      ? hp_wmi_get_fan_speed_victus_s(channel)
 			      : hp_wmi_get_fan_speed(channel);
 			if (rpm < 0) {
@@ -2817,7 +2862,10 @@ static int hp_wmi_hwmon_read(struct device *dev, enum hwmon_sensor_types type,
 				ret = -EOPNOTSUPP;
 				break;
 			}
-			rpm = hp_wmi_get_fan_speed_victus_s(channel);
+			if (priv->uses_victus_s_fan_commands)
+				rpm = hp_wmi_get_fan_speed_victus_s(channel);
+			else
+				rpm = hp_wmi_get_fan_speed(channel);
 			if (rpm < 0) {
 				ret = rpm;
 				break;
@@ -2872,11 +2920,15 @@ static int hp_wmi_hwmon_write(struct device *dev, enum hwmon_sensor_types type,
 				ret = -EINVAL;
 				break;
 			}
-			rpm = pwm_to_rpm(val, priv);
-			rpm = clamp_val(rpm, priv->min_rpm, priv->max_rpm);
+			if (val == 0) {
+				rpm = 0;
+			} else {
+				rpm = pwm_to_rpm(val, priv);
+				rpm = clamp_val(rpm, priv->min_rpm, priv->max_rpm);
+			}
 			priv->target_rpms[0] = (u16)rpm * 100;
-			priv->target_rpms[1] = (u16)(rpm + priv->gpu_delta) * 100;
-			priv->pwm = rpm_to_pwm(rpm, priv);
+			priv->target_rpms[1] = (u16)(rpm > 0 ? (rpm + priv->gpu_delta) * 100 : 0);
+			priv->pwm = val;
 			ret = hp_wmi_apply_fan_settings(priv);
 			break;
 		}
@@ -2893,14 +2945,24 @@ static int hp_wmi_hwmon_write(struct device *dev, enum hwmon_sensor_types type,
 				ret = -EOPNOTSUPP;
 				break;
 			}
+			if (priv->mode == PWM_MODE_MANUAL)
+				break; /* already in MANUAL, preserve target_rpms */
+
 			/*
 			 * Seed target RPMs from the current fan speed so the
 			 * transition to manual mode is smooth.
 			 */
-			rpm = hp_wmi_get_fan_speed_victus_s(0);
+			if (priv->uses_victus_s_fan_commands)
+				rpm = hp_wmi_get_fan_speed_victus_s(0);
+			else
+				rpm = hp_wmi_get_fan_speed(0);
 			if (rpm >= 0)
 				priv->target_rpms[0] = rpm;
-			rpm = hp_wmi_get_fan_speed_victus_s(1);
+
+			if (priv->uses_victus_s_fan_commands)
+				rpm = hp_wmi_get_fan_speed_victus_s(1);
+			else
+				rpm = hp_wmi_get_fan_speed(1);
 			if (rpm >= 0)
 				priv->target_rpms[1] = rpm;
 
@@ -2948,12 +3010,13 @@ static int hp_wmi_hwmon_write(struct device *dev, enum hwmon_sensor_types type,
 			ret = -EOPNOTSUPP;
 			break;
 		}
-		if (channel < 0 || channel > 1 ||
-		    val < 0 || val > priv->max_rpms[channel]) {
+		if (channel < 0 || channel > 1 || val < 0) {
 			ret = -EINVAL;
 			break;
 		}
 		priv->target_rpms[channel] = val;
+		if (priv->target_rpms[channel ^ 1] == 0)
+			priv->target_rpms[channel ^ 1] = val;
 		priv->mode = PWM_MODE_MANUAL;
 		ret = hp_wmi_apply_fan_settings(priv);
 		break;
@@ -3033,113 +3096,90 @@ static int hp_wmi_setup_fan_settings(struct hp_wmi_hwmon_priv *priv)
 	u8 fan_data[128] = {0};
 	struct victus_s_fan_table *fan_table;
 	u8 min_rpm, max_rpm, gpu_delta;
-	int ret;
+	int cpu_rpm, gpu_rpm, ret;
 
 	priv->mode = PWM_MODE_AUTO;
 
 	/*
 	 * Fan table queries and Victus S fan speed commands only apply to
 	 * Victus S-series boards.
-	 *
-	 * Omen boards are excluded unconditionally — even when
-	 * force_fan_control_support=1 — because Omen hardware does not
-	 * support the Victus S GM fan speed commands (0x2D/0x2E/0x2F).
-	 * Forcing those commands on an Omen board would silently fail or
-	 * produce undefined behaviour.  Omen max-fan mode (PWM_MODE_MAX)
-	 * is still available via hp_wmi_fan_speed_max_set() regardless.
-	 *
-	 * force_fan_control_support is only meaningful for non-Omen boards
-	 * that are not yet in victus_s_thermal_profile_boards but whose
-	 * firmware does support the Victus S GM commands.
 	 */
-	if (is_omen_thermal_profile() && !is_victus_s_thermal_profile())
+	if (is_omen_thermal_profile() && !is_victus_s_thermal_profile()) {
+		pr_info("Omen board detected, setting fallback fan speed limits for manual mode\n");
+		hp_wmi_set_fallback_fan_limits(priv);
+		priv->uses_victus_s_fan_commands = false;
 		return 0;
+	}
 
-	if (!is_victus_s_thermal_profile())
+	if (!is_victus_s_thermal_profile()) {
+		if (force_fan_control_support) {
+			pr_info("Forcing fan control support on non-Victus-S board\n");
+			hp_wmi_set_fallback_fan_limits(priv);
+			priv->uses_victus_s_fan_commands = false;
+		}
 		return 0;
+	}
 
+	/* 1. Try Victus-S fan table query */
 	ret = hp_wmi_perform_query(HPWMI_VICTUS_S_GET_FAN_TABLE_QUERY, HPWMI_GM,
 				   &fan_data, 4, sizeof(fan_data));
-	if (ret) {
-		int cpu_rpm = -1, gpu_rpm = -1;
-
-		/*
-		 * Some Victus-S compatible boards (including boards using
-		 * omen_v1 thermal parameters) do not expose the fan-table
-		 * query, but still support Victus-S fan speed commands.
-		 *
-		 * Probe fan speed first and, when available, expose fan
-		 * controls with conservative safe limits.
-		 */
-		cpu_rpm = hp_wmi_get_fan_speed_victus_s(CPU_FAN);
-		gpu_rpm = hp_wmi_get_fan_speed_victus_s(GPU_FAN);
-		/*
-		 * Expose fallback controls only when both fan channels are
-		 * readable, matching the two-channel hwmon interface below.
-		 */
-		if (cpu_rpm >= 0 && gpu_rpm >= 0) {
-			pr_info("Fan table query unsupported, using fallback fan speed probing with safe limits\n");
-			hp_wmi_set_fallback_fan_limits(priv);
+	if (ret == 0) {
+		fan_table = (struct victus_s_fan_table *)fan_data;
+		if (fan_table->header.num_fans > 0 &&
+		    sizeof(struct victus_s_fan_table_header) +
+		    sizeof(struct victus_s_fan_table_entry) *
+		    fan_table->header.num_fans <= sizeof(fan_data)) {
+			
+			min_rpm = fan_table->entries[0].cpu_rpm;
+			max_rpm = fan_table->entries[fan_table->header.num_fans - 1].cpu_rpm;
+			gpu_delta = (fan_table->entries[0].gpu_rpm > fan_table->entries[0].cpu_rpm)
+				    ? fan_table->entries[0].gpu_rpm - fan_table->entries[0].cpu_rpm
+				    : 0;
+			
+			priv->min_rpm = min_rpm;
+			priv->max_rpm = max_rpm;
+			priv->gpu_delta = gpu_delta;
+			priv->max_rpms[0] = max_rpm * 100;
+			priv->max_rpms[1] = (max_rpm + gpu_delta) * 100;
+			priv->target_rpms[0] = 0;
+			priv->target_rpms[1] = 0;
+			priv->prev_mode      = -1;
+			priv->fan_speed_available = true;
+			priv->uses_victus_s_fan_commands = true;
 			return 0;
 		}
+		pr_warn("Malformed fan table, falling back to probing\n");
+	}
 
-		if (!force_fan_control_support) {
-			/*
-			 * FIX: degrade gracefully instead of returning an
-			 * error that kills probe.  The board is in the Victus S
-			 * list but its EC doesn't support the fan table query
-			 * (e.g. future boards with omen_v1 params).  Manual fan
-			 * control will simply be unavailable.
-			 */
-			pr_info("Fan table query unsupported on this board, manual fan control unavailable\n");
-			return 0;
-		}
-
-		/*
-		 * User forced fan control support but the EC query failed.
-		 * Fall back to safe conservative limits.
-		 */
-		pr_warn("Failed to get fan table (%d), falling back to 5000 RPM safe limits\n",
-			ret);
+	/* 2. Fallback: Probe Victus-S fan speed commands directly */
+	cpu_rpm = hp_wmi_get_fan_speed_victus_s(CPU_FAN);
+	gpu_rpm = hp_wmi_get_fan_speed_victus_s(GPU_FAN);
+	if (cpu_rpm >= 0 && gpu_rpm >= 0) {
+		pr_info("Fan table query unsupported, using fallback fan speed probing with safe limits\n");
 		hp_wmi_set_fallback_fan_limits(priv);
+		priv->uses_victus_s_fan_commands = true;
 		return 0;
 	}
 
-	fan_table = (struct victus_s_fan_table *)fan_data;
-	if (fan_table->header.num_fans == 0 ||
-	    sizeof(struct victus_s_fan_table_header) +
-	    sizeof(struct victus_s_fan_table_entry) *
-	    fan_table->header.num_fans > sizeof(fan_data)) {
-		if (!force_fan_control_support) {
-			pr_info("Malformed fan table on this board, manual fan control unavailable\n");
-			return 0;
-		}
-
-		pr_warn("Malformed fan table, falling back to 5000 RPM safe limits\n");
+	/* 3. Fallback: Probe standard Omen fan commands (for legacy/cross-over boards like 8BBE) */
+	cpu_rpm = hp_wmi_get_fan_speed(CPU_FAN);
+	gpu_rpm = hp_wmi_get_fan_speed(GPU_FAN);
+	if (cpu_rpm >= 0 && gpu_rpm >= 0) {
+		pr_info("Victus-S fan queries unsupported on this board, using standard Omen fan commands\n");
 		hp_wmi_set_fallback_fan_limits(priv);
+		priv->uses_victus_s_fan_commands = false;
 		return 0;
 	}
 
-	min_rpm = fan_table->entries[0].cpu_rpm;
-	max_rpm = fan_table->entries[fan_table->header.num_fans - 1].cpu_rpm;
+	/* 4. Total failure */
+	if (force_fan_control_support) {
+		pr_warn("Forcing fan control support despite probe failures, falling back to 5000 RPM safe limits\n");
+		hp_wmi_set_fallback_fan_limits(priv);
+		priv->uses_victus_s_fan_commands = false; /* Safest default */
+		return 0;
+	}
 
-	gpu_delta = (fan_table->entries[0].gpu_rpm > fan_table->entries[0].cpu_rpm)
-		    ? fan_table->entries[0].gpu_rpm - fan_table->entries[0].cpu_rpm
-		    : 0;
-
-	priv->min_rpm   = min_rpm;
-	priv->max_rpm   = max_rpm;
-	priv->gpu_delta = gpu_delta;
-
-	priv->max_rpms[0] = (u16)max_rpm * 100;
-	priv->max_rpms[1] = (u16)fan_table->entries[
-		fan_table->header.num_fans - 1].gpu_rpm * 100;
-
-	priv->target_rpms[0] = 0;
-	priv->target_rpms[1] = 0;
-	priv->prev_mode      = -1; /* Force first application */
-	priv->fan_speed_available = true;
-
+	pr_info("Fan controls unsupported on this board, manual fan control unavailable\n");
 	return 0;
 }
 
@@ -3215,8 +3255,18 @@ static void __init setup_active_thermal_profile_params(void)
 static int __init hp_wmi_init(void)
 {
 	int event_capable = wmi_has_guid(HPWMI_EVENT_GUID);
-	int bios_capable  = wmi_has_guid(HPWMI_BIOS_GUID);
+	int bios_capable;
 	int err, tmp = 0;
+
+	if (wmi_has_guid(HPWMI_OMEN_HPC_GUID)) {
+		active_bios_guid = HPWMI_OMEN_HPC_GUID;
+		bios_capable = 1;
+	} else if (wmi_has_guid(HPWMI_BIOS_GUID)) {
+		active_bios_guid = HPWMI_BIOS_GUID;
+		bios_capable = 1;
+	} else {
+		bios_capable = 0;
+	}
 
 	if (!bios_capable && !event_capable)
 		return -ENODEV;
@@ -3228,8 +3278,10 @@ static int __init hp_wmi_init(void)
 
 	if (event_capable) {
 		err = hp_wmi_input_setup();
-		if (err)
-			return err;
+		if (err) {
+			pr_warn("hp_wmi_input_setup failed (%d), continuing without event handling\n", err);
+			event_capable = 0;
+		}
 	}
 
 	if (bios_capable) {

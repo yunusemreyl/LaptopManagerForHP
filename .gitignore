@@ -28,3 +28,14 @@ driver/.*.cmd
 driver/.*.d
 /tmp/
 issues/
+news.md
+.vs/OmenCtl.slnx/FileContentIndex/c5b6dbf7-797e-42bf-8d60-dc44204f6f1f.vsidx
+.vs/OmenCtl.slnx/v18/.wsuo
+.vs/OmenCtl.slnx/v18/Browse.VC.db
+.vs/OmenCtl.slnx/v18/DocumentLayout.json
+.vs/OmenCtl/CopilotIndices/18.7.1253.33689/CodeChunks.db
+.vs/OmenCtl/CopilotIndices/18.7.1253.33689/SemanticSymbols.db
+.vs/ProjectSettings.json
+.vs/slnx.sqlite
+.vs/VSWorkspaceState.json
+documentation/issues.md

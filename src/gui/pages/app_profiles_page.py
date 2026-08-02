@@ -376,6 +376,12 @@ class AppProfilesPage(Gtk.Box):
                         
                     profile_lbl = Gtk.Label(label=lbl_settings, xalign=0, halign=Gtk.Align.END, css_classes=["dim-label"])
                     
+                    launch_btn = Gtk.Button(label="▶")
+                    launch_btn.add_css_class("update-btn")
+                    launch_btn.set_valign(Gtk.Align.CENTER)
+                    launch_btn.set_tooltip_text(T("launch"))
+                    launch_btn.connect("clicked", lambda *_, a=app_name, v=val: self._launch_app_program(a, v))
+
                     edit_btn = Gtk.Button(label="✏️")
                     edit_btn.add_css_class("update-btn")
                     edit_btn.set_valign(Gtk.Align.CENTER)
@@ -390,6 +396,7 @@ class AppProfilesPage(Gtk.Box):
                     
                     row.append(lbl)
                     row.append(profile_lbl)
+                    row.append(launch_btn)
                     row.append(edit_btn)
                     row.append(del_btn)
                     
@@ -515,6 +522,31 @@ class AppProfilesPage(Gtk.Box):
             self._refresh_app_profiles()
         except Exception as e:
             print(f"Failed to add/update app profile: {e}")
+
+    def _launch_app_program(self, app_name, val):
+        import subprocess
+        try:
+            # Handle launcher prefixes (e.g. steam_12345, flatpak_com.org.App, snap_app)
+            if app_name.startswith("steam_"):
+                game_id = app_name.split("_", 1)[1]
+                subprocess.Popen(["steam", f"steam://rungameid/{game_id}"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            elif app_name.startswith("flatpak_"):
+                flatpak_id = app_name.split("_", 1)[1]
+                subprocess.Popen(["flatpak", "run", flatpak_id], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            elif app_name.startswith("snap_"):
+                snap_id = app_name.split("_", 1)[1]
+                subprocess.Popen(["snap", "run", snap_id], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            elif app_name.startswith("lutris_"):
+                lutris_id = app_name.split("_", 1)[1]
+                subprocess.Popen(["lutris", f"lutris:rungameid/{lutris_id}"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            elif app_name.startswith("heroic_"):
+                heroic_id = app_name.split("_", 1)[1]
+                subprocess.Popen(["heroic", f"heroic://launch/{heroic_id}"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            else:
+                # Direct executable name
+                subprocess.Popen([app_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception as e:
+            print(f"Failed to launch program {app_name}: {e}")
 
     def _delete_app_profile(self, app_name):
         if not self.power_service:

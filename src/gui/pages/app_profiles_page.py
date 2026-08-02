@@ -155,27 +155,14 @@ class AppProfilesPage(Gtk.Box):
         list_header_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10, valign=Gtk.Align.CENTER)
         list_header_box.append(Gtk.Label(label=T("app_profiles"), xalign=0, hexpand=True, css_classes=["heading"]))
         
-        # View switcher (Grid vs List)
-        self.view_mode = "grid"  # default to professional grid card view
-        switcher_box = Gtk.Box(spacing=2)
-        switcher_box.add_css_class("fan-mode-compact-strip")
-        switcher_box.set_valign(Gtk.Align.CENTER)
+        # Single View Mode Switcher Button (Grid ↔ List)
+        self.view_mode = "grid"
+        self.btn_view_toggle = Gtk.Button(label="⊞ Grid")
+        self.btn_view_toggle.set_tooltip_text("Switch View (Grid / List)")
+        self.btn_view_toggle.add_css_class("update-btn")
+        self.btn_view_toggle.connect("clicked", self._toggle_view_mode)
         
-        self.btn_grid_view = Gtk.ToggleButton(label="⊞ Grid")
-        self.btn_grid_view.set_active(True)
-        self.btn_grid_view.set_tooltip_text("Grid View")
-        self.btn_grid_view.add_css_class("fan-mode-compact-btn")
-        self.btn_grid_view.connect("toggled", lambda btn: self._on_view_toggle(btn, "grid"))
-        switcher_box.append(self.btn_grid_view)
-        
-        self.btn_list_view = Gtk.ToggleButton(label="≡ List")
-        self.btn_list_view.set_active(False)
-        self.btn_list_view.set_tooltip_text("List View")
-        self.btn_list_view.add_css_class("fan-mode-compact-btn")
-        self.btn_list_view.connect("toggled", lambda btn: self._on_view_toggle(btn, "list"))
-        switcher_box.append(self.btn_list_view)
-        
-        list_header_box.append(switcher_box)
+        list_header_box.append(self.btn_view_toggle)
         self.list_card.append(list_header_box)
         
         self.app_profiles_list_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
@@ -189,24 +176,18 @@ class AppProfilesPage(Gtk.Box):
         self._refresh_app_profiles()
         self.set_ui_scale("normal")
 
-    def _on_view_toggle(self, btn, mode):
-        if getattr(self, "_block_view_toggle", False):
-            return
-        if btn.get_active():
-            self._block_view_toggle = True
-            if mode == "grid":
-                self.btn_list_view.set_active(False)
-            else:
-                self.btn_grid_view.set_active(False)
-            self._block_view_toggle = False
-            
-            if self.view_mode != mode:
-                self.view_mode = mode
-                self._refresh_app_profiles()
-        else:
-            # Prevent deselecting both buttons
-            if not self.btn_grid_view.get_active() and not self.btn_list_view.get_active():
-                btn.set_active(True)
+    def _toggle_view_mode(self, btn=None):
+        self.view_mode = "list" if self.view_mode == "grid" else "grid"
+        label = "⊞ Grid" if self.view_mode == "grid" else "≡ List"
+        self.btn_view_toggle.set_label(label)
+        
+        # Persist view mode preference to D-Bus / config if available
+        if self.power_service and hasattr(self.power_service, "SetAppProfilesViewMode"):
+            try:
+                self.power_service.SetAppProfilesViewMode(self.view_mode)
+            except Exception:
+                pass
+        self._refresh_app_profiles()
 
     def _init_autocomplete(self):
         self._selected_exec_name = None
@@ -344,6 +325,13 @@ class AppProfilesPage(Gtk.Box):
             if self.app_profiles_switch.get_active() != enabled:
                 self.app_profiles_switch.set_active(enabled)
             self._block_sync = False
+
+            # Restore saved view mode preference
+            saved_mode = data.get("app_profiles_view_mode", "grid")
+            if saved_mode in ("grid", "list") and getattr(self, "_view_mode_initialized", False) is False:
+                self.view_mode = saved_mode
+                self.btn_view_toggle.set_label("⊞ Grid" if self.view_mode == "grid" else "≡ List")
+                self._view_mode_initialized = True
             
             # Clear list box
             while True:

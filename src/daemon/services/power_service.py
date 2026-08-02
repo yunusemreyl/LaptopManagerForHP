@@ -490,6 +490,7 @@ class PowerService:
         <method name="SetPowerProfile"><arg type="s" name="profile" direction="in"/><arg type="s" name="resp" direction="out"/></method>
         <method name="GetPowerProfile"><arg type="s" name="j" direction="out"/></method>
         <method name="SetAppProfilesEnabled"><arg type="b" name="enabled" direction="in"/><arg type="s" name="resp" direction="out"/></method>
+        <method name="SetAppProfilesViewMode"><arg type="s" name="mode" direction="in"/><arg type="s" name="resp" direction="out"/></method>
         <method name="SetAppProfiles"><arg type="s" name="profiles_json" direction="in"/><arg type="s" name="resp" direction="out"/></method>
         <method name="SetUndervolt"><arg type="i" name="mv" direction="in"/><arg type="s" name="resp" direction="out"/></method>
         <method name="SetTccOffset"><arg type="i" name="val" direction="in"/><arg type="s" name="resp" direction="out"/></method>
@@ -507,6 +508,7 @@ class PowerService:
             {
                 "power_profile": "balanced",
                 "app_profiles_enabled": False,
+                "app_profiles_view_mode": "grid",
                 "app_profiles": {},
                 "undervolt_mv": 0,
                 "tcc_offset": 0,
@@ -709,6 +711,7 @@ class PowerService:
                 "active": self._ctrl.get_active(),
                 "profiles": self._ctrl.get_profiles(),
                 "app_profiles_enabled": self._config.get("app_profiles_enabled", False),
+                "app_profiles_view_mode": self._config.get("app_profiles_view_mode", "grid"),
                 "app_profiles": self._config.get("app_profiles", {}),
                 "active_app": self._active_app,
                 "capabilities": self.ec.capabilities.to_dict(),
@@ -837,6 +840,13 @@ class PowerService:
         logger.info("SetAppProfilesEnabled: %s", enabled)
         self._config.set("app_profiles_enabled", bool(enabled))
         self._config.save()
+        return "OK"
+
+    def SetAppProfilesViewMode(self, mode):
+        logger.info("SetAppProfilesViewMode: %s", mode)
+        if mode in ("grid", "list"):
+            self._config.set("app_profiles_view_mode", mode)
+            self._config.save()
         return "OK"
 
     def SetAppProfiles(self, profiles_json):

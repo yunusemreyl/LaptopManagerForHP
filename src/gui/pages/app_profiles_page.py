@@ -408,6 +408,8 @@ class AppProfilesPage(Gtk.Box):
             theme = "default"
 
         self.add_app_entry.set_text(display_name)
+        self.add_app_entry.select_region(0, -1)
+        self.add_app_entry.grab_focus()
         self._selected_exec_name = app_name
 
         profile_map_inv = {"power-saver": 0, "balanced": 1, "performance": 2}

@@ -675,13 +675,14 @@ class AppProfilesPage(Gtk.Box):
             print(f"Failed to add/update app profile: {e}")
 
     def _launch_app_program(self, app_name, val):
-        import subprocess
+        import subprocess, shutil
         
-        # Check if application/process is already running
+        # Determine exact launcher or executable token
         target_token = app_name.split("_", 1)[1] if "_" in app_name else app_name
         is_running = False
         target_pid = None
 
+        # Check if process is already running to avoid duplicate instances
         try:
             for pid_str in os.listdir("/proc"):
                 if not pid_str.isdigit():
@@ -701,32 +702,31 @@ class AppProfilesPage(Gtk.Box):
         except Exception:
             pass
 
-        # If already running, bring existing window to focus
+        # If already running, attempt to focus existing window
         if is_running and target_pid:
+            focused = False
             try:
-                # Try wmctrl first
                 if shutil.which("wmctrl"):
                     res = subprocess.run(["wmctrl", "-ia", str(target_pid)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                     if res.returncode == 0:
-                        return
-                    # Try matching by window title / app name
-                    disp_name = val.get("name", target_token) if isinstance(val, dict) else target_token
-                    res = subprocess.run(["wmctrl", "-a", disp_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                    if res.returncode == 0:
-                        return
+                        focused = True
+                    else:
+                        disp_name = val.get("name", target_token) if isinstance(val, dict) else target_token
+                        res = subprocess.run(["wmctrl", "-a", disp_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                        if res.returncode == 0:
+                            focused = True
                 
-                # Fallback to xdotool
-                if shutil.which("xdotool"):
+                if not focused and shutil.which("xdotool"):
                     res = subprocess.run(["xdotool", "search", "--pid", str(target_pid), "windowactivate"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                     if res.returncode == 0:
-                        return
+                        focused = True
             except Exception:
                 pass
-            # App is already running, prevent launching duplicate windows
-            print(f"Program '{target_token}' is already running (PID: {target_pid}). Focused existing instance.")
-            return
 
-        # Not running -> launch fresh instance
+            if focused:
+                return
+
+        # Execute launcher / application
         try:
             if app_name.startswith("steam_"):
                 game_id = app_name.split("_", 1)[1]
@@ -744,7 +744,51 @@ class AppProfilesPage(Gtk.Box):
                 heroic_id = app_name.split("_", 1)[1]
                 subprocess.Popen(["heroic", f"heroic://launch/{heroic_id}"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             else:
-                subprocess.Popen([app_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                # 1. Try gtk-launch with desktop file name (e.g. firefox.desktop, code.desktop)
+                launched = False
+                desktop_candidates = [
+                    f"{app_name}.desktop",
+                    f"org.gnome.{app_name}.desktop",
+                    f"com.{app_name}.desktop"
+                ]
+                if shutil.which("gtk-launch"):
+                    for d_file in desktop_candidates:
+                        res = subprocess.run(["gtk-launch", d_file], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                        if res.returncode == 0:
+                            launched = True
+                            break
+
+                # 2. Try direct binary / command execution via PATH or desktop Exec field
+                if not launched:
+                    cmd_parts = app_name.split()
+                    exec_cmd = cmd_parts[0]
+                    if shutil.which(exec_cmd):
+                        subprocess.Popen(cmd_parts, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    else:
+                        # Fallback using desktop file search in /usr/share/applications
+                        for d_dir in ["/usr/share/applications", os.path.expanduser("~/.local/share/applications")]:
+                            if launched:
+                                break
+                            if not os.path.exists(d_dir):
+                                continue
+                            for fname in os.listdir(d_dir):
+                                if fname.endswith(".desktop") and app_name.lower() in fname.lower():
+                                    d_path = os.path.join(d_dir, fname)
+                                    try:
+                                        with open(d_path, "r", errors="ignore") as df:
+                                            for line in df:
+                                                if line.startswith("Exec="):
+                                                    exec_line = line.split("=", 1)[1].strip()
+                                                    # Strip desktop spec placeholders %u, %f, etc.
+                                                    exec_clean = " ".join([token for token in exec_line.split() if not token.startswith("%")])
+                                                    if exec_clean:
+                                                        subprocess.Popen(exec_clean, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                                                        launched = True
+                                                        break
+                                    except Exception:
+                                        pass
+                                    if launched:
+                                        break
         except Exception as e:
             print(f"Failed to launch program {app_name}: {e}")
 

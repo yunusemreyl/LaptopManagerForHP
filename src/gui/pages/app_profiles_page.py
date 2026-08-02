@@ -98,11 +98,13 @@ class AppProfilesPage(Gtk.Box):
         toggle_card.append(self.app_profiles_switch)
         root.append(toggle_card)
 
-        # ── Add Mapping Form Card ──
+        # ── Add/Edit Mapping Form Card ──
         add_card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=15)
         add_card.add_css_class("card")
         self._add_card = add_card
-        add_card.append(Gtk.Label(label=T("add"), xalign=0, css_classes=["heading"]))
+        
+        self.form_heading_lbl = Gtk.Label(label=T("add"), xalign=0, css_classes=["heading"])
+        add_card.append(self.form_heading_lbl)
 
         form_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12, valign=Gtk.Align.CENTER)
         
@@ -129,11 +131,19 @@ class AppProfilesPage(Gtk.Box):
         self.add_theme_dd.set_tooltip_text(T("theme_label"))
         form_box.append(self.add_theme_dd)
         
-        add_btn = Gtk.Button(label=T("add"))
-        add_btn.add_css_class("suggested-action")
-        add_btn.set_valign(Gtk.Align.CENTER)
-        add_btn.connect("clicked", self._add_app_profile)
-        form_box.append(add_btn)
+        self.add_btn = Gtk.Button(label=T("add"))
+        self.add_btn.add_css_class("suggested-action")
+        self.add_btn.set_valign(Gtk.Align.CENTER)
+        self.add_btn.connect("clicked", self._add_app_profile)
+        form_box.append(self.add_btn)
+
+        self.cancel_edit_btn = Gtk.Button(label="✕")
+        self.cancel_edit_btn.add_css_class("update-btn")
+        self.cancel_edit_btn.set_valign(Gtk.Align.CENTER)
+        self.cancel_edit_btn.set_visible(False)
+        self.cancel_edit_btn.set_tooltip_text(T("wizard_cancel"))
+        self.cancel_edit_btn.connect("clicked", self._cancel_edit_mode)
+        form_box.append(self.cancel_edit_btn)
         
         add_card.append(form_box)
         root.append(add_card)
@@ -148,6 +158,7 @@ class AppProfilesPage(Gtk.Box):
         root.append(self.list_card)
 
         # Initialize Auto-Suggest completions
+        self._editing_app_key = None
         self._init_autocomplete()
 
         self._refresh_app_profiles()
@@ -353,6 +364,12 @@ class AppProfilesPage(Gtk.Box):
                         
                     profile_lbl = Gtk.Label(label=lbl_settings, xalign=0, halign=Gtk.Align.END, css_classes=["dim-label"])
                     
+                    edit_btn = Gtk.Button(label="✏️")
+                    edit_btn.add_css_class("update-btn")
+                    edit_btn.set_valign(Gtk.Align.CENTER)
+                    edit_btn.set_tooltip_text(T("edit"))
+                    edit_btn.connect("clicked", lambda *_, a=app_name, v=val: self._start_edit_app_profile(a, v))
+
                     del_btn = Gtk.Button(label="🗑️")
                     del_btn.add_css_class("update-btn")
                     del_btn.set_valign(Gtk.Align.CENTER)
@@ -361,6 +378,7 @@ class AppProfilesPage(Gtk.Box):
                     
                     row.append(lbl)
                     row.append(profile_lbl)
+                    row.append(edit_btn)
                     row.append(del_btn)
                     
                     self.app_profiles_list_box.append(row)
@@ -369,6 +387,48 @@ class AppProfilesPage(Gtk.Box):
             print(f"Failed to refresh app profiles: {e}")
             
         return False
+
+    def _start_edit_app_profile(self, app_name, val):
+        self._editing_app_key = app_name
+        self.form_heading_lbl.set_label(T("edit"))
+        self.add_btn.set_label(T("update"))
+        self.cancel_edit_btn.set_visible(True)
+
+        if isinstance(val, dict):
+            profile = val.get("profile", "balanced")
+            category = val.get("category", "game")
+            display_name = val.get("name", app_name)
+            fan_mode = val.get("fan_mode", "default")
+            theme = val.get("theme", "default")
+        else:
+            profile = val
+            category = "game"
+            display_name = app_name
+            fan_mode = "default"
+            theme = "default"
+
+        self.add_app_entry.set_text(display_name)
+        self._selected_exec_name = app_name
+
+        profile_map_inv = {"power-saver": 0, "balanced": 1, "performance": 2}
+        self.add_profile_dd.set_selected(profile_map_inv.get(profile, 1))
+
+        cat_map_inv = {"game": 0, "program": 1, "other": 2}
+        self.add_category_dd.set_selected(cat_map_inv.get(category, 0))
+
+        fan_map_inv = {"default": 0, "auto": 1, "max": 2}
+        self.add_fan_dd.set_selected(fan_map_inv.get(fan_mode, 0))
+
+        theme_map_inv = {"default": 0, "dark": 1, "light": 2}
+        self.add_theme_dd.set_selected(theme_map_inv.get(theme, 0))
+
+    def _cancel_edit_mode(self, btn=None):
+        self._editing_app_key = None
+        self.form_heading_lbl.set_label(T("add"))
+        self.add_btn.set_label(T("add"))
+        self.cancel_edit_btn.set_visible(False)
+        self.add_app_entry.set_text("")
+        self._selected_exec_name = None
 
     def _on_app_profiles_toggle(self, switch, state):
         if getattr(self, "_block_sync", False):
@@ -405,10 +465,10 @@ class AppProfilesPage(Gtk.Box):
         theme_map = {0: "default", 1: "dark", 2: "light"}
         theme = theme_map.get(theme_idx, "default")
         
-        # Check if we have a mapped suggestion selected
+        # Check if we have a mapped suggestion selected or if we are editing an existing item
         exec_name = getattr(self, "_selected_exec_name", None)
         if not exec_name:
-            exec_name = app_input.lower()
+            exec_name = self._editing_app_key if self._editing_app_key else app_input.lower()
             display_name = app_input
         else:
             display_name = app_input
@@ -417,6 +477,11 @@ class AppProfilesPage(Gtk.Box):
             raw = self.power_service.GetPowerProfile()
             data = json.loads(raw)
             app_profiles = data.get("app_profiles", {})
+
+            # If editing and key changed, remove old key
+            if self._editing_app_key and self._editing_app_key in app_profiles and self._editing_app_key != exec_name:
+                del app_profiles[self._editing_app_key]
+
             app_profiles[exec_name] = {
                 "profile": profile,
                 "category": category,
@@ -426,11 +491,10 @@ class AppProfilesPage(Gtk.Box):
             }
             
             self.power_service.SetAppProfiles(json.dumps(app_profiles))
-            self.add_app_entry.set_text("")
-            self._selected_exec_name = None
+            self._cancel_edit_mode()
             self._refresh_app_profiles()
         except Exception as e:
-            print(f"Failed to add app profile: {e}")
+            print(f"Failed to add/update app profile: {e}")
 
     def _delete_app_profile(self, app_name):
         if not self.power_service:

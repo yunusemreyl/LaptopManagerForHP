@@ -145,7 +145,7 @@ TRANSLATIONS = {
 
         # App Profiles
         "app_profiles_desc": "Oyun veya uygulama çalıştığında güç profili otomatik değişir.",
-        "add": "Ekle", "delete": "Sil",
+        "add": "Ekle", "edit": "Düzenle", "delete": "Sil", "update": "Güncelle",
         "placeholder_app": "Uygulama adı (Örn: steam, cs2.exe, studio)",
         "game": "Oyun", "program": "Program", "other": "Diğer",
         "fan_default": "Fan: Varsayılan", "fan_auto": "Fan: Otomatik", "fan_max": "Fan: Maksimum",
@@ -299,7 +299,7 @@ TRANSLATIONS = {
 
         # App Profiles
         "app_profiles_desc": "Automatically switch power profile when an app or game is launched.",
-        "add": "Add", "delete": "Delete",
+        "add": "Add", "edit": "Edit", "delete": "Delete", "update": "Update",
         "placeholder_app": "App name (e.g. steam, cs2.exe, studio)",
         "game": "Game", "program": "Program", "other": "Other",
         "fan_default": "Fan: Default", "fan_auto": "Fan: Auto", "fan_max": "Fan: Max",

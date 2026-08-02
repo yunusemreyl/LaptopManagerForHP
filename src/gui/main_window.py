@@ -1663,11 +1663,10 @@ class HPManagerWindow(Gtk.ApplicationWindow):
             box-shadow: 0 12px 22px rgba(0,0,0,0.14);
         }}
         .inner-panel {{
-            background: rgba(152, 156, 166, 0.07);
-            border: 1px solid alpha({accent}, 0.14);
+            background: alpha({fg}, 0.035);
+            border: 1px solid {card_border};
             border-radius: 14px;
             padding: 14px;
-            box-shadow: inset 0 1px 0 alpha({fg}, 0.04), 0 0 0 1px alpha(#ffffff, 0.04), 0 8px 18px alpha(#ffffff, 0.08);
         }}
         .status-strip {{
             background: rgba(152, 156, 166, 0.06);

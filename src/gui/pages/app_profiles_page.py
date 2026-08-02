@@ -377,11 +377,11 @@ class AppProfilesPage(Gtk.Box):
                     is_active = active_app and (active_app.lower() == app_name.lower())
 
                     # Outer Card Box
-                    card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+                    card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
                     card.add_css_class("inner-panel")
-                    card.set_size_request(210, 165)
+                    card.set_size_request(220, 155)
 
-                    # Top Row: Icon + Title + Active Status Badge
+                    # Top Row: App Icon + Name + Active Status Badge
                     top_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10, valign=Gtk.Align.CENTER)
                     
                     if theme_icon.has_icon(icon_name):
@@ -389,7 +389,7 @@ class AppProfilesPage(Gtk.Box):
                     else:
                         fallback_icon = "application-x-executable-symbolic" if category == "program" else "input-gaming-symbolic"
                         img = Gtk.Image.new_from_icon_name(fallback_icon)
-                    img.set_pixel_size(32)
+                    img.set_pixel_size(28)
                     top_box.append(img)
 
                     title_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2, hexpand=True)
@@ -398,7 +398,7 @@ class AppProfilesPage(Gtk.Box):
 
                     if is_active:
                         act_lbl = Gtk.Label(css_classes=["caption"])
-                        act_lbl.set_markup(f"<span foreground='#57c494' weight='bold'>[{T('active')}]</span>")
+                        act_lbl.set_markup(f"<span foreground='#57c494' weight='bold'>● {T('active')}</span>")
                         act_lbl.set_xalign(0)
                         title_box.append(act_lbl)
 
@@ -407,26 +407,31 @@ class AppProfilesPage(Gtk.Box):
 
                     card.append(Gtk.Separator())
 
-                    # Meta Settings Badges
+                    # Professional Status Pills / Settings Row
+                    meta_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6, vexpand=True, valign=Gtk.Align.CENTER)
+                    
                     p_text = T("saver") if profile == "power-saver" else T("balanced") if profile == "balanced" else T("performance")
-                    meta_parts = [f"⚡ {p_text}"]
+                    p_badge = Gtk.Label(label=f"⚡ {p_text}", css_classes=["dim-label"])
+                    p_badge.set_xalign(0)
+                    meta_box.append(p_badge)
+
                     if fan_mode and fan_mode != "default":
                         fan_lbl_text = T("fan_auto") if fan_mode == "auto" else T("fan_max")
-                        meta_parts.append(f"🌀 {fan_lbl_text}")
-                    if theme == "dark":
-                        meta_parts.append("🌙 Dark")
-                    elif theme == "light":
-                        meta_parts.append("☀️ Light")
+                        fan_badge = Gtk.Label(label=f"🌀 {fan_lbl_text}", css_classes=["dim-label"])
+                        meta_box.append(fan_badge)
 
-                    meta_lbl = Gtk.Label(label="\n".join(meta_parts), xalign=0, css_classes=["dim-label"], wrap=True)
-                    meta_lbl.set_vexpand(True)
-                    card.append(meta_lbl)
+                    if theme and theme != "default":
+                        t_symbol = "🌙" if theme == "dark" else "☀️"
+                        theme_badge = Gtk.Label(label=t_symbol, css_classes=["dim-label"])
+                        meta_box.append(theme_badge)
+
+                    card.append(meta_box)
 
                     # Action Buttons Row
                     actions_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6, halign=Gtk.Align.END)
 
                     launch_btn = Gtk.Button(label="▶")
-                    launch_btn.add_css_class("suggested-action")
+                    launch_btn.add_css_class("update-btn")
                     launch_btn.set_tooltip_text(T("launch"))
                     launch_btn.connect("clicked", lambda *_, a=app_name, v=val: self._launch_app_program(a, v))
                     actions_box.append(launch_btn)

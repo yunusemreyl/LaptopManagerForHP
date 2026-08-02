@@ -60,9 +60,22 @@ The Fan Service handles the D-Bus endpoints and the background thermal intellige
 
 ---
 
+---
+
 ## 4. Power & Tuning (`src/daemon/services/power_service.py`)
+
+### `_app_monitor_loop(self)`
+- **What it does:** Scans `/proc` process command lines and active desktop launcher environment variables (Steam, Flatpak, Snap, Lutris, Heroic).
+- **Purpose:** Automatically switches power profile, fan mode, and GTK application theme (dark/light) when a configured game or program becomes active, restoring pre-app state upon exit.
+- **Expectations:** Non-blocking background thread that updates `self._active_app`.
+
+### `SetAppProfilesViewMode(self, mode: str) -> str`
+- **What it does:** Persists the user's preferred Application Profiles layout view mode (`grid` or `list`) into `/etc/hp-manager/power.json`.
+- **Purpose:** Remembers UI layout preferences across system reboots and app restarts.
+- **Expectations:** Accepts `"grid"` or `"list"`. Returns `"OK"`.
 
 ### `apply_power_limits(self)`
 - **What it does:** Depending on the CPU vendor (Intel vs AMD), it invokes third-party binaries or shell commands. For AMD, it executes `ryzenadj --stapm-limit=X --fast-limit=Y`. For Intel, it executes `undervolt --core X --cache Y`.
 - **Purpose:** To give the user direct hardware-level control over power consumption. By integrating RyzenAdj and Undervolt, OmenCtl abstracts away the complex command-line arguments into simple GUI sliders.
 - **Expectations:** Expects the underlying tools (`ryzenadj` or `undervolt`) to be installed in the system `PATH`. If they fail, it logs the stderr silently without crashing the main Daemon.
+

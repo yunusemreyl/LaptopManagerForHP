@@ -26,7 +26,7 @@ An open-source, root-daemon powered GTK4 tool for managing performance profiles,
 * **Power & Performance Switching:** Seamlessly toggle between `power-saver`, `balanced`, and `performance` hardware profiles.
 * **MUX Switch Control:** Native interface for Optimus / dGPU routing switching (requires reboot, natively uses undocumented WMI payload `0x52`).
 * **RGB Keyboard Lighting:** Configure your 4-Zone keyboard backlighting with wave, breathing, cycle, and static colors.
-* **Application Automation:** Define custom power limits and fan curves for individual games (Steam, Lutris, Flatpak).
+* **Application Automation & Profiles:** Define custom power limits, fan curves, and dark/light GTK themes for games & programs (Steam, Flatpak, Snap, Lutris, Heroic). Features real app icons, direct program launching (`▶`) with duplicate-focus protection, debounced controls, and a persistent Grid (`⊞`) / List (`≡`) view switcher.
 * **Macro & OMEN Key Mapping:** Remap the proprietary OMEN keys to custom shell scripts or keyboard macros.
 
 ---

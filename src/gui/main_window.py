@@ -3546,6 +3546,35 @@ class HPManagerWindow(Gtk.ApplicationWindow):
             app_profiles["metric_sub"].set_label("Otomatik" if is_tr else "Auto")
             self._set_launcher_badge("app_profiles", False)
 
+            # Check if active app specifies a theme override
+            if enabled:
+                active_app = ppi.get("active_app")
+                all_profiles = ppi.get("app_profiles", {})
+                target_theme = "default"
+                if active_app and active_app in all_profiles:
+                    val = all_profiles[active_app]
+                    if isinstance(val, dict):
+                        target_theme = val.get("theme", "default")
+
+                if not hasattr(self, "_active_app_theme_override"):
+                    self._active_app_theme_override = "default"
+
+                if target_theme != self._active_app_theme_override:
+                    self._active_app_theme_override = target_theme
+                    effective_theme = self.app_theme if target_theme == "default" else target_theme
+                    if HAS_ADW:
+                        sm = Adw.StyleManager.get_default()
+                        if effective_theme == "dark":
+                            sm.set_color_scheme(Adw.ColorScheme.FORCE_DARK)
+                        elif effective_theme == "light":
+                            sm.set_color_scheme(Adw.ColorScheme.FORCE_LIGHT)
+                        else:
+                            sm.set_color_scheme(Adw.ColorScheme.DEFAULT)
+                    else:
+                        settings_gtk = Gtk.Settings.get_default()
+                        if settings_gtk is not None:
+                            settings_gtk.set_property("gtk-application-prefer-dark-theme", effective_theme == "dark")
+
         settings = self._launcher_cards.get("settings")
         if settings:
             settings["metric_main"].set_label("OK" if ok else "Offline")

@@ -56,6 +56,7 @@ from pages.settings_page import SettingsPage
 from pages.keyboard_page import KeyboardPage
 from pages.app_profiles_page import AppProfilesPage
 from pages.power_page import PowerPage
+from pages.dashboard_page import DashboardPage
 
 APP_VERSION = "1.6.6"
 CONFIG_FILE      = os.path.expanduser("~/.config/hp-manager.toml")
@@ -175,6 +176,25 @@ class FixedMenuIcon(Gtk.DrawingArea):
                 cr.move_to(x1, y1)
                 cr.line_to(x2, y2)
                 cr.stroke()
+            return
+
+        if kind == "performance":
+            cx, cy = w / 2, h * 0.63
+            r = min(w, h) * 0.34
+            cr.arc(cx, cy, r, math.pi, 2 * math.pi)
+            cr.stroke()
+            for index in range(7):
+                angle = math.pi + index * math.pi / 6
+                inner = r * 0.76
+                cr.move_to(cx + inner * math.cos(angle), cy + inner * math.sin(angle))
+                cr.line_to(cx + r * math.cos(angle), cy + r * math.sin(angle))
+                cr.stroke()
+            needle = math.pi * 1.72
+            cr.move_to(cx, cy)
+            cr.line_to(cx + r * 0.66 * math.cos(needle), cy + r * 0.66 * math.sin(needle))
+            cr.stroke()
+            cr.arc(cx, cy, r * 0.09, 0, 2 * math.pi)
+            cr.fill()
             return
 
         if kind == "lighting":
@@ -2117,7 +2137,8 @@ class HPManagerWindow(Gtk.ApplicationWindow):
 
         # ── Navigation items (excluding Settings) ──
         nav_items = [
-            ("fan",          self.page_titles["fan"],          "fan"),
+            ("dashboard",    self.page_titles["dashboard"],    "dashboard"),
+            ("fan",          self.page_titles["fan"],          "performance"),
             ("lighting",     self.page_titles["lighting"],     "lighting"),
             ("power",        self.page_titles["power"],        "power"),
             ("keyboard",     self.page_titles["keyboard"],     "keyboard"),
@@ -2301,6 +2322,7 @@ class HPManagerWindow(Gtk.ApplicationWindow):
         self.home_page = self._build_home_page()
 
         # Pages
+        self.dashboard_page  = DashboardPage(services={}, on_navigate=self._navigate)
         self.fan_page        = FanPage(service=None, on_profile_change=self._on_profile_mode_changed)
         self.lighting_page   = LightingPage(service=None)
         self.power_page      = PowerPage(service=None)
@@ -2315,6 +2337,7 @@ class HPManagerWindow(Gtk.ApplicationWindow):
         )
 
         self.stack.add_named(self.home_page, "home")
+        self.stack.add_named(self.dashboard_page,  "dashboard")
         self.stack.add_named(self.fan_page,        "fan")
         self.stack.add_named(self.lighting_page,   "lighting")
         self.stack.add_named(self.power_page,      "power")
@@ -2323,6 +2346,8 @@ class HPManagerWindow(Gtk.ApplicationWindow):
         self.stack.add_named(self.mux_page,        "mux")
         self.stack.add_named(self.settings_page,   "settings")
 
+        self.dashboard_page.set_dark(self._is_dark_mode())
+        self.dashboard_page.set_temp_unit(self.temp_unit)
         self.fan_page.set_dark(self.app_theme == "dark")
         self.fan_page.set_temp_unit(self.temp_unit)
 
@@ -2446,7 +2471,7 @@ class HPManagerWindow(Gtk.ApplicationWindow):
 
         cards = [
             ("dashboard", self.page_titles["dashboard"], "dashboard"),
-            ("fan", self.page_titles["fan"], "fan"),
+            ("fan", self.page_titles["fan"], "performance"),
             ("lighting", self.page_titles["lighting"], "lighting"),
             ("power", self.page_titles["power"], "power"),
             ("keyboard", self.page_titles["keyboard"], "keyboard"),
@@ -2526,7 +2551,7 @@ class HPManagerWindow(Gtk.ApplicationWindow):
             target.add_css_class(target_cls)
 
         self._apply_home_scale(bucket)
-        for page_attr in ("fan_page", "lighting_page", "power_page", "keyboard_page", "app_profiles_page", "mux_page", "settings_page"):
+        for page_attr in ("dashboard_page", "fan_page", "lighting_page", "power_page", "keyboard_page", "app_profiles_page", "mux_page", "settings_page"):
             page = getattr(self, page_attr, None)
             if page and hasattr(page, "set_ui_scale"):
                 try:
@@ -2834,7 +2859,7 @@ class HPManagerWindow(Gtk.ApplicationWindow):
         self.theme_toggle_icon.set_valign(Gtk.Align.CENTER)
         box.append(self.theme_toggle_icon)
 
-        lbl_text = T("light") if self.app_theme == "dark" else T("dark")
+        lbl_text = T("dark") if self._is_dark_mode() else T("light")
         self.theme_toggle_lbl = Gtk.Label(label=lbl_text)
         self.theme_toggle_lbl.add_css_class("nav-label")
         self.theme_toggle_lbl.set_visible(False)
@@ -2882,8 +2907,8 @@ class HPManagerWindow(Gtk.ApplicationWindow):
         if not hasattr(self, "theme_toggle_icon") or self.theme_toggle_icon is None:
             return
         is_dark = self._is_dark_mode()
-        set_icon(self.theme_toggle_icon, "appearance" if is_dark else "theme")
-        lbl_text = T("light") if is_dark else T("dark")
+        set_icon(self.theme_toggle_icon, "moon" if is_dark else "sun")
+        lbl_text = T("dark") if is_dark else T("light")
         if hasattr(self, "theme_toggle_lbl") and self.theme_toggle_lbl is not None:
             self.theme_toggle_lbl.set_label(lbl_text)
 
@@ -2891,6 +2916,8 @@ class HPManagerWindow(Gtk.ApplicationWindow):
         self._update_theme_toggle_icon_state()
         self._apply_css()
         self._refresh_launcher_icon_colors()
+        if hasattr(self, "dashboard_page"):
+            self.dashboard_page.set_dark(self._is_dark_mode())
         self._update_logo()
         if hasattr(self, "menu_back_btn"):
             self.menu_back_btn.set_child(self._build_menu_back_content())
@@ -3069,6 +3096,8 @@ class HPManagerWindow(Gtk.ApplicationWindow):
             self.fan_page.set_platform_service(svcs.get("platform"))
             self.fan_page.set_power_service(svcs.get("power"))
             self.fan_page.set_rgb_service(svcs.get("rgb"))
+        if hasattr(self, "dashboard_page") and self.dashboard_page is not None:
+            self.dashboard_page.set_services(svcs)
         if hasattr(self, "lighting_page") and self.lighting_page is not None:
             self.lighting_page.set_service(svcs.get("rgb"))
         if hasattr(self, "power_page") and self.power_page is not None:
@@ -3081,6 +3110,7 @@ class HPManagerWindow(Gtk.ApplicationWindow):
             self.mux_page.set_service(svcs.get("mux"))
         if hasattr(self, "settings_page") and self.settings_page is not None:
             self.settings_page.set_service(svcs.get("mux"))
+            self.settings_page.set_power_service(svcs.get("power"))
         self._refresh_launcher_metrics()
 
     def _schedule_daemon_retry(self):
@@ -3156,6 +3186,8 @@ class HPManagerWindow(Gtk.ApplicationWindow):
             self.menu_back_btn.set_child(self._build_menu_back_content())
         if hasattr(self, 'fan_page'):
             self.fan_page.set_dark(theme == "dark")
+        if hasattr(self, 'dashboard_page'):
+            self.dashboard_page.set_dark(self._is_dark_mode())
         self._update_logo()
         self._refresh_launcher_metrics()
         self._update_theme_toggle_icon_state()
@@ -3542,6 +3574,8 @@ class HPManagerWindow(Gtk.ApplicationWindow):
         self._save_config()
         if hasattr(self, 'fan_page'):
             self.fan_page.set_temp_unit(unit)
+        if hasattr(self, 'dashboard_page'):
+            self.dashboard_page.set_temp_unit(unit)
 
     # ── Page rebuild (language change) ────────────────────────────────────────
 
@@ -3550,20 +3584,19 @@ class HPManagerWindow(Gtk.ApplicationWindow):
         self._rebuilding = True
         try:
             current_page = self.stack.get_visible_child_name()
-            if current_page == "dashboard":
-                current_page = "fan"
 
-            for attr in ('fan_page', 'lighting_page', 'power_page'):
+            for attr in ('dashboard_page', 'fan_page', 'lighting_page', 'power_page'):
                 page = getattr(self, attr, None)
                 if page and hasattr(page, 'cleanup'):
                     page.cleanup()
 
-            for name in ("home", "fan", "lighting", "power", "keyboard", "app_profiles", "mux", "settings"):
+            for name in ("home", "dashboard", "fan", "lighting", "power", "keyboard", "app_profiles", "mux", "settings"):
                 child = self.stack.get_child_by_name(name)
                 if child:
                     self.stack.remove(child)
 
             self.home_page = self._build_home_page()
+            self.dashboard_page  = DashboardPage(services={}, on_navigate=self._navigate)
             self.fan_page        = FanPage(service=None, on_profile_change=self._on_profile_mode_changed)
             self.lighting_page   = LightingPage(service=None)
             self.power_page      = PowerPage(service=None)
@@ -3578,6 +3611,7 @@ class HPManagerWindow(Gtk.ApplicationWindow):
             )
 
             self.stack.add_named(self.home_page, "home")
+            self.stack.add_named(self.dashboard_page,  "dashboard")
             self.stack.add_named(self.fan_page,        "fan")
             self.stack.add_named(self.lighting_page,   "lighting")
             self.stack.add_named(self.power_page,      "power")
@@ -3589,6 +3623,7 @@ class HPManagerWindow(Gtk.ApplicationWindow):
             # Reconnect daemon services to the freshly-created pages
             services = getattr(self, "services", None)
             if services:
+                self.dashboard_page.set_services(services)
                 self.fan_page.set_service(services.get("fan"))
                 self.fan_page.set_platform_service(services.get("platform"))
                 self.fan_page.set_power_service(services.get("power"))
@@ -3598,7 +3633,10 @@ class HPManagerWindow(Gtk.ApplicationWindow):
                 self.app_profiles_page.set_power_service(services.get("power"))
                 self.mux_page.set_service(services.get("mux"))
                 self.settings_page.set_service(services.get("mux"))
+                self.settings_page.set_power_service(services.get("power"))
 
+            self.dashboard_page.set_dark(self._is_dark_mode())
+            self.dashboard_page.set_temp_unit(self.temp_unit)
             self.fan_page.set_dark(self.app_theme == "dark")
             self.fan_page.set_temp_unit(self.temp_unit)
             if self.performance_mode == "eco":
@@ -3645,7 +3683,7 @@ class HPManagerWindow(Gtk.ApplicationWindow):
             except Exception:
                 pass
             self._launcher_timer_id = None
-        for attr in ('lighting_page', 'fan_page', 'power_page'):
+        for attr in ('dashboard_page', 'lighting_page', 'fan_page', 'power_page'):
             page = getattr(self, attr, None)
             if page and hasattr(page, 'cleanup'):
                 try:

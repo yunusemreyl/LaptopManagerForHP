@@ -42,14 +42,16 @@ else:
 
 class SettingsPage(Gtk.Box):
 
-    def __init__(self, on_theme_change=None, on_lang_change=None, on_temp_unit_change=None, service=None):
+    def __init__(self, on_theme_change=None, on_lang_change=None, on_temp_unit_change=None, service=None, power_service=None):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         self.on_theme_change = on_theme_change
         self.on_lang_change = on_lang_change
         self.on_temp_unit_change = on_temp_unit_change
         self.service = service
+        self.power_service = power_service
         self._mux_backends = []
         self._updating_mux_dd = False
+        self._updating_power_source_ui = False
 
         self._css_provider = Gtk.CssProvider()
         Gtk.StyleContext.add_provider_for_display(
@@ -469,7 +471,59 @@ class SettingsPage(Gtk.Box):
         content.append(appear_card)
 
         # ══════════════════════════════════════════════════════════════════════
-        # 2. UPDATES CARD
+        # 2. POWER SOURCE AUTOMATION CARD
+        # ══════════════════════════════════════════════════════════════════════
+        power_source_card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        power_source_card.add_css_class("settings-card")
+        power_source_card.add_css_class("card-power-source")
+        self._power_source_card = power_source_card
+
+        content.append(self._make_section_header("power", T("power_source_automation")))
+
+        self.power_source_switch = Gtk.Switch()
+        self.power_source_switch.set_sensitive(False)
+        self.power_source_switch.connect("state-set", self._on_power_source_toggle)
+        power_source_card.append(self._make_settings_row(
+            "autostart", T("power_source_auto"), self.power_source_switch,
+            sublabel=T("power_source_auto_desc"), bg_class="icon-bg-sys"))
+
+        power_source_card.append(self._make_sep())
+
+        profile_labels = [T("power_saver_lbl"), T("balanced_lbl"), T("performance_lbl")]
+        self._power_profile_ids = ["power-saver", "balanced", "performance"]
+
+        self.ac_profile_dd = Gtk.DropDown(model=Gtk.StringList.new(profile_labels))
+        self.ac_profile_dd.set_selected(1)
+        self.ac_profile_dd.set_sensitive(False)
+        self.ac_profile_dd.connect("notify::selected", self._on_power_source_profile_changed)
+        power_source_card.append(self._make_settings_row(
+            "power", T("plugged_in_profile"), self.ac_profile_dd,
+            sublabel=T("plugged_in_profile_desc")))
+
+        power_source_card.append(self._make_sep())
+
+        self.battery_profile_dd = Gtk.DropDown(model=Gtk.StringList.new(profile_labels))
+        self.battery_profile_dd.set_selected(0)
+        self.battery_profile_dd.set_sensitive(False)
+        self.battery_profile_dd.connect("notify::selected", self._on_power_source_profile_changed)
+        power_source_card.append(self._make_settings_row(
+            "battery", T("battery_profile"), self.battery_profile_dd,
+            sublabel=T("battery_profile_desc")))
+
+        power_source_card.append(self._make_sep())
+        self.power_source_status = Gtk.Label(
+            label=T("power_source_connecting"), xalign=0, halign=Gtk.Align.START)
+        self.power_source_status.add_css_class("settings-row-sublabel")
+        self.power_source_status.set_margin_top(8)
+        self.power_source_status.set_margin_bottom(8)
+        self.power_source_status.set_margin_start(12)
+        self.power_source_status.set_margin_end(12)
+        power_source_card.append(self.power_source_status)
+
+        content.append(power_source_card)
+
+        # ══════════════════════════════════════════════════════════════════════
+        # 3. UPDATES CARD
         # ══════════════════════════════════════════════════════════════════════
         update_card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         update_card.add_css_class("settings-card")
@@ -946,7 +1000,7 @@ class SettingsPage(Gtk.Box):
         content.set_margin_bottom(margins[3])
         content.set_spacing(content_spacing)
 
-        for attr in ("_appear_card", "_update_card", "_info_card",
+        for attr in ("_appear_card", "_power_source_card", "_update_card", "_info_card",
                       "_mux_card", "_about_card", "_debug_card"):
             card = getattr(self, attr, None)
             if card is not None:
@@ -955,7 +1009,9 @@ class SettingsPage(Gtk.Box):
         for dd in (getattr(self, "theme_dd", None),
                    getattr(self, "lang_dd", None),
                    getattr(self, "temp_dd", None),
-                   getattr(self, "mux_dd", None)):
+                   getattr(self, "mux_dd", None),
+                   getattr(self, "ac_profile_dd", None),
+                   getattr(self, "battery_profile_dd", None)):
             if dd is not None:
                 dd.set_size_request(drop_w, -1)
 
@@ -984,6 +1040,121 @@ class SettingsPage(Gtk.Box):
     def set_service(self, service):
         self.service = service
         GLib.idle_add(self._refresh_mux_backend)
+
+    def set_power_service(self, service):
+        """Attach the power daemon proxy and load AC/battery profile settings."""
+        self.power_service = service
+        if not service:
+            self.power_source_switch.set_sensitive(False)
+            self.ac_profile_dd.set_sensitive(False)
+            self.battery_profile_dd.set_sensitive(False)
+            self.power_source_status.set_label(T("power_source_unavailable"))
+            return
+        self.power_source_status.set_label(T("power_source_connecting"))
+        threading.Thread(target=self._load_power_source_settings, daemon=True).start()
+
+    def _load_power_source_settings(self):
+        try:
+            data = json.loads(self.power_service.GetPowerProfile())
+            GLib.idle_add(self._apply_power_source_settings, data, None)
+        except Exception as error:
+            GLib.idle_add(self._apply_power_source_settings, None, str(error))
+
+    def _apply_power_source_settings(self, data, error):
+        if error or not data:
+            self.power_source_switch.set_sensitive(self.power_service is not None)
+            self.ac_profile_dd.set_sensitive(False)
+            self.battery_profile_dd.set_sensitive(False)
+            self.power_source_status.set_label(
+                f"{T('error')}: {error}" if error else T("power_source_unavailable"))
+            return False
+
+        profiles = data.get("profiles") or self._power_profile_ids
+        profiles = [profile for profile in self._power_profile_ids if profile in profiles]
+        if not profiles:
+            profiles = self._power_profile_ids[:]
+        labels = {
+            "power-saver": T("power_saver_lbl"),
+            "balanced": T("balanced_lbl"),
+            "performance": T("performance_lbl"),
+        }
+
+        self._updating_power_source_ui = True
+        self._available_power_profile_ids = profiles
+        model = Gtk.StringList.new([labels[profile] for profile in profiles])
+        self.ac_profile_dd.set_model(model)
+        self.battery_profile_dd.set_model(
+            Gtk.StringList.new([labels[profile] for profile in profiles]))
+
+        ac_profile = data.get("ac_profile", "balanced")
+        battery_profile = data.get("battery_profile", "power-saver")
+        self.ac_profile_dd.set_selected(profiles.index(ac_profile) if ac_profile in profiles else 0)
+        self.battery_profile_dd.set_selected(
+            profiles.index(battery_profile) if battery_profile in profiles else 0)
+
+        enabled = bool(data.get("power_source_profiles_enabled", False))
+        self.power_source_switch.set_active(enabled)
+        self.power_source_switch.set_sensitive(True)
+        self.ac_profile_dd.set_sensitive(enabled)
+        self.battery_profile_dd.set_sensitive(enabled)
+        self._updating_power_source_ui = False
+
+        source = data.get("power_source", "unknown")
+        source_label = {
+            "ac": T("power_source_ac"),
+            "battery": T("power_source_battery"),
+        }.get(source, T("power_source_unknown"))
+        active = labels.get(data.get("active"), data.get("active", "—"))
+        self.power_source_status.set_label(
+            T("power_source_status").format(source=source_label, profile=active))
+        return False
+
+    def _on_power_source_toggle(self, _switch, state):
+        if self._updating_power_source_ui:
+            return False
+        self.ac_profile_dd.set_sensitive(bool(state))
+        self.battery_profile_dd.set_sensitive(bool(state))
+        self._save_power_source_profiles(enabled=bool(state))
+        return False
+
+    def _on_power_source_profile_changed(self, _dropdown, _param):
+        if self._updating_power_source_ui or not self.power_source_service_available:
+            return
+        self._save_power_source_profiles()
+
+    @property
+    def power_source_service_available(self):
+        return self.power_service is not None and hasattr(self, "_available_power_profile_ids")
+
+    def _save_power_source_profiles(self, enabled=None):
+        if not self.power_source_service_available:
+            return
+        profiles = self._available_power_profile_ids
+        ac_idx = min(self.ac_profile_dd.get_selected(), len(profiles) - 1)
+        battery_idx = min(self.battery_profile_dd.get_selected(), len(profiles) - 1)
+        ac_profile = profiles[ac_idx]
+        battery_profile = profiles[battery_idx]
+        if enabled is None:
+            enabled = self.power_source_switch.get_active()
+
+        # Keep profile writes ordered from the user's perspective.  The daemon
+        # call is fast, and controls are restored as soon as fresh state returns.
+        self.power_source_switch.set_sensitive(False)
+        self.ac_profile_dd.set_sensitive(False)
+        self.battery_profile_dd.set_sensitive(False)
+        self.power_source_status.set_label(T("power_source_saving"))
+
+        def _save():
+            try:
+                result = self.power_service.SetPowerSourceProfiles(
+                    bool(enabled), ac_profile, battery_profile)
+                if result != "OK":
+                    raise RuntimeError(result)
+                self._load_power_source_settings()
+            except Exception as error:
+                GLib.idle_add(self._apply_power_source_settings, None, str(error))
+
+        threading.Thread(target=_save, daemon=True).start()
 
     def _refresh_mux_backend(self):
         if not self.service:

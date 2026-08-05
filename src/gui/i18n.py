@@ -77,6 +77,20 @@ TRANSLATIONS = {
         # Settings page
         "appearance": "GÖRÜNÜM", "theme": "Tema", "lang_label": "Dil / Language",
         "dark": "Koyu", "light": "Açık", "system": "Sistem Uyarlanır",
+        "power_source_automation": "GÜÇ KAYNAĞI OTOMASYONU",
+        "power_source_auto": "Prize göre profili otomatik değiştir",
+        "power_source_auto_desc": "Adaptör takıldığında ve çıkarıldığında seçilen güç profiline geçer.",
+        "plugged_in_profile": "Prize takılıyken",
+        "plugged_in_profile_desc": "Güç adaptörü bağlıyken kullanılacak profil.",
+        "battery_profile": "Bataryadayken",
+        "battery_profile_desc": "Bilgisayar bataryadan çalışırken kullanılacak profil.",
+        "power_source_connecting": "Güç hizmetine bağlanılıyor...",
+        "power_source_saving": "Profil tercihleri kaydediliyor...",
+        "power_source_unavailable": "Güç hizmeti kullanılamıyor.",
+        "power_source_ac": "Prize takılı",
+        "power_source_battery": "Batarya",
+        "power_source_unknown": "Bilinmiyor",
+        "power_source_status": "Şu an: {source} · {profile}",
         "updates": "GÜNCELLEMELER", "current_ver": "Mevcut sürüm",
         "per_key_wizard": "Per-Key RGB Eşleştirme Sihirbazı",
         "wizard_start_desc": "Hangi tuşun hangi sıraya denk geldiğini bulmak için klavyenizdeki tuşlar sırayla kırmızı yanacaktır. Yanan tuşa klavyeden basarak eşleştirin.",
@@ -95,6 +109,13 @@ TRANSLATIONS = {
         "fan_metric": "Fan",
         "disk": "Disk", "ram": "RAM",
         "cpu_load_30s": "CPU Yükü (Son 30 sn)",
+        "live_telemetry": "CANLI TELEMETRİ",
+        "last_10_minutes": "Son 10 dakika",
+        "temperature_history": "Sıcaklık",
+        "fan_speed_history": "Fan Hızı",
+        "ten_minutes_ago": "10 dk önce",
+        "now": "Şimdi",
+        "fan_1": "Fan 1", "fan_2": "Fan 2",
         "power_profile_label": "Güç Profili", "fan_mode_label": "Fan Modu",
         "gpu_mux_label": "GPU / MUX",
         "battery": "Batarya", "ac_power": "Güç Kablosu",
@@ -231,6 +252,20 @@ TRANSLATIONS = {
         # Settings page
         "appearance": "APPEARANCE", "theme": "Theme", "lang_label": "Language",
         "dark": "Dark", "light": "Light", "system": "System Default",
+        "power_source_automation": "POWER SOURCE AUTOMATION",
+        "power_source_auto": "Switch profile automatically for AC power",
+        "power_source_auto_desc": "Uses the selected profile when the adapter is connected or removed.",
+        "plugged_in_profile": "While plugged in",
+        "plugged_in_profile_desc": "Profile used while the power adapter is connected.",
+        "battery_profile": "While on battery",
+        "battery_profile_desc": "Profile used while the computer runs on battery.",
+        "power_source_connecting": "Connecting to the power service...",
+        "power_source_saving": "Saving profile preferences...",
+        "power_source_unavailable": "Power service is unavailable.",
+        "power_source_ac": "Plugged in",
+        "power_source_battery": "Battery",
+        "power_source_unknown": "Unknown",
+        "power_source_status": "Current: {source} · {profile}",
         "updates": "UPDATES", "current_ver": "Current version",
         "per_key_wizard": "Per-Key RGB Mapping Wizard",
         "wizard_start_desc": "To find out which key corresponds to which index, the keys on your keyboard will light up red one by one. Press the illuminated key on your keyboard to map it.",
@@ -249,6 +284,13 @@ TRANSLATIONS = {
         "fan_metric": "Fan",
         "disk": "Disk", "ram": "RAM",
         "cpu_load_30s": "CPU Load (Last 30s)",
+        "live_telemetry": "LIVE TELEMETRY",
+        "last_10_minutes": "Last 10 minutes",
+        "temperature_history": "Temperature",
+        "fan_speed_history": "Fan Speed",
+        "ten_minutes_ago": "10 min ago",
+        "now": "Now",
+        "fan_1": "Fan 1", "fan_2": "Fan 2",
         "power_profile_label": "Power Profile", "fan_mode_label": "Fan Mode",
         "gpu_mux_label": "GPU / MUX",
         "battery": "Battery", "ac_power": "Power Cable",
@@ -337,7 +379,8 @@ except ImportError:
 
 def T(key):
     """Get translation for key using current active_lang."""
-    return TRANSLATIONS.get(active_lang, TRANSLATIONS["en"]).get(key, key)
+    catalog = TRANSLATIONS.get(active_lang, TRANSLATIONS["en"])
+    return catalog.get(key, TRANSLATIONS["en"].get(key, key))
 
 
 def set_lang(lang):

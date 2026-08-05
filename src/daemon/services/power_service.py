@@ -37,6 +37,46 @@ THERMAL_PROFILE_BALANCED = 0
 
 _dbus_pool = concurrent.futures.ThreadPoolExecutor(max_workers=2, thread_name_prefix="pwr-dbus")
 
+POWER_PROFILES = ("power-saver", "balanced", "performance")
+AC_SUPPLY_TYPES = {"mains", "usb", "usb-c", "usb_pd", "usb-pd"}
+
+
+def detect_power_source(base_path="/sys/class/power_supply"):
+    """Return ``ac``, ``battery`` or ``unknown`` from Linux power-supply sysfs."""
+    try:
+        entries = sorted(os.listdir(base_path))
+    except OSError:
+        return "unknown"
+
+    battery_statuses = []
+    for entry in entries:
+        supply_path = os.path.join(base_path, entry)
+        try:
+            with open(os.path.join(supply_path, "type"), encoding="utf-8") as handle:
+                supply_type = handle.read().strip().lower()
+        except OSError:
+            continue
+
+        if supply_type in AC_SUPPLY_TYPES:
+            try:
+                with open(os.path.join(supply_path, "online"), encoding="utf-8") as handle:
+                    if handle.read().strip() == "1":
+                        return "ac"
+            except OSError:
+                continue
+        elif supply_type == "battery":
+            try:
+                with open(os.path.join(supply_path, "status"), encoding="utf-8") as handle:
+                    battery_statuses.append(handle.read().strip().lower())
+            except OSError:
+                battery_statuses.append("")
+
+    if any(status in {"charging", "full", "not charging"} for status in battery_statuses):
+        return "ac"
+    if battery_statuses:
+        return "battery"
+    return "unknown"
+
 def is_amd_cpu():
     try:
         with open("/proc/cpuinfo", "r") as f:
@@ -489,6 +529,7 @@ class PowerService:
       <interface name="com.yyl.hpmanager.power">
         <method name="SetPowerProfile"><arg type="s" name="profile" direction="in"/><arg type="s" name="resp" direction="out"/></method>
         <method name="GetPowerProfile"><arg type="s" name="j" direction="out"/></method>
+        <method name="SetPowerSourceProfiles"><arg type="b" name="enabled" direction="in"/><arg type="s" name="ac_profile" direction="in"/><arg type="s" name="battery_profile" direction="in"/><arg type="s" name="resp" direction="out"/></method>
         <method name="SetAppProfilesEnabled"><arg type="b" name="enabled" direction="in"/><arg type="s" name="resp" direction="out"/></method>
         <method name="SetAppProfiles"><arg type="s" name="profiles_json" direction="in"/><arg type="s" name="resp" direction="out"/></method>
         <method name="SetUndervolt"><arg type="i" name="mv" direction="in"/><arg type="s" name="resp" direction="out"/></method>
@@ -506,6 +547,9 @@ class PowerService:
             "power",
             {
                 "power_profile": "balanced",
+                "power_source_profiles_enabled": False,
+                "ac_profile": "balanced",
+                "battery_profile": "power-saver",
                 "app_profiles_enabled": False,
                 "app_profiles": {},
                 "undervolt_mv": 0,
@@ -524,6 +568,8 @@ class PowerService:
 
         self._active_app = None
         self._pre_app_state = None  # (power_profile, fan_mode)
+        self._automation_lock = threading.RLock()
+        self._power_source = detect_power_source()
 
         # Restore saved profile after a short delay so that PPD / tuned /
         # ACPI subsystems are fully initialised.  Without this delay the
@@ -534,6 +580,49 @@ class PowerService:
 
         # Background app monitor thread
         threading.Thread(target=self._app_monitor_loop, daemon=True).start()
+        threading.Thread(target=self._power_source_monitor_loop, daemon=True).start()
+
+    def _desired_base_profile(self, source=None):
+        """Resolve the base profile, respecting optional AC/battery automation."""
+        if self._config.get("power_source_profiles_enabled", False):
+            source = source or self._power_source
+            key = "ac_profile" if source == "ac" else "battery_profile" if source == "battery" else None
+            if key:
+                target = self._config.get(key)
+                if target in self._ctrl.get_profiles():
+                    return target
+        return self._config.get("power_profile", "balanced")
+
+    def _power_source_monitor_loop(self):
+        while True:
+            time.sleep(2.0)
+            source = detect_power_source()
+            if source == self._power_source:
+                continue
+            previous = self._power_source
+            self._power_source = source
+            logger.info("Power source changed: %s -> %s", previous, source)
+            self._apply_power_source_profile(source)
+
+    def _apply_power_source_profile(self, source=None):
+        if not self._config.get("power_source_profiles_enabled", False):
+            return False
+        source = source or self._power_source
+        if source not in ("ac", "battery"):
+            return False
+
+        with self._automation_lock:
+            if self._active_app is not None:
+                logger.info("Power source profile deferred while app profile '%s' is active", self._active_app)
+                return False
+            target = self._desired_base_profile(source)
+            if target not in self._ctrl.get_profiles():
+                return False
+            current = self._ctrl.get_active()
+            if current == target:
+                return True
+            logger.info("Power source automation: source=%s, switching %s -> %s", source, current, target)
+            return bool(self._ctrl.set_profile(target))
 
     def _delayed_profile_restore(self, _retry=0):
         """Restore saved power profile with retry.
@@ -548,7 +637,7 @@ class PowerService:
         the source of truth, and only skip the write if the hardware already
         agrees AND PPD also agrees.
         """
-        saved = self._config.get("power_profile", "balanced")
+        saved = self._desired_base_profile()
         if saved not in self._ctrl.get_profiles():
             logger.warning("Saved profile '%s' not in available profiles, skipping restore", saved)
             return
@@ -682,6 +771,8 @@ class PowerService:
     def _restore_pre_app_state(self, fan_proxy):
         if self._pre_app_state:
             old_power, old_fan = self._pre_app_state
+            if self._config.get("power_source_profiles_enabled", False):
+                old_power = self._desired_base_profile()
             logger.info("App Monitor: App closed, restoring power=%s, fan=%s", old_power, old_fan)
             self._ctrl.set_profile(old_power)
             if fan_proxy and old_fan in ("auto", "max"):
@@ -708,6 +799,10 @@ class PowerService:
                 "available": self._ctrl.available,
                 "active": self._ctrl.get_active(),
                 "profiles": self._ctrl.get_profiles(),
+                "power_source": self._power_source,
+                "power_source_profiles_enabled": self._config.get("power_source_profiles_enabled", False),
+                "ac_profile": self._config.get("ac_profile", "balanced"),
+                "battery_profile": self._config.get("battery_profile", "power-saver"),
                 "app_profiles_enabled": self._config.get("app_profiles_enabled", False),
                 "app_profiles": self._config.get("app_profiles", {}),
                 "active_app": self._active_app,
@@ -719,6 +814,26 @@ class PowerService:
                 "pl_enabled": self._config.get("pl_enabled", False),
             }
         )
+
+    def SetPowerSourceProfiles(self, enabled, ac_profile, battery_profile):
+        available = set(self._ctrl.get_profiles()) or set(POWER_PROFILES)
+        if ac_profile not in available or battery_profile not in available:
+            logger.warning(
+                "SetPowerSourceProfiles: unsupported profile ac=%s battery=%s available=%s",
+                ac_profile, battery_profile, sorted(available),
+            )
+            return "FAIL"
+
+        self._config.update({
+            "power_source_profiles_enabled": bool(enabled),
+            "ac_profile": ac_profile,
+            "battery_profile": battery_profile,
+        })
+        self._config.save()
+        self._power_source = detect_power_source()
+        if enabled:
+            self._apply_power_source_profile(self._power_source)
+        return "OK"
 
     def SetUndervolt(self, mv):
         try:

@@ -5,6 +5,8 @@ import math
 import cairo
 import concurrent.futures
 
+_TWO_PI = 2 * math.pi
+
 class TemperatureRing(Gtk.Box):
     """Circular temperature indicator with emphasized value and muted unit."""
 
@@ -553,4 +555,3 @@ class OmenSpecsBridge(Gtk.DrawingArea):
 # ═════════════════════════════════════════════════════════════════════════════
 #  SYSTEM MONITOR DATA WORKER
 # ═════════════════════════════════════════════════════════════════════════════
-

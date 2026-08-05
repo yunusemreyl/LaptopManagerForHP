@@ -11,7 +11,9 @@ gi.require_version("Gtk", "4.0")
 from gi.repository import Gtk, GLib, Gdk
 from components.custom_widgets import TemperatureRing, CPUSparkline, ResourceBox
 from icon_utils import make_icon
+from widgets.history_buffer import HistoryBuffer
 from widgets.smooth_scroll import SmoothScrolledWindow
+from widgets.telemetry_history import TelemetryGraph
 import cairo
 
 # ── Lazy i18n import ─────────────────────────────────────────────────────────
@@ -19,13 +21,10 @@ def T(key):
     from i18n import T as _T
     return _T(key)
 
-# ═════════════════════════════════════════════════════════════════════════════
-#  DONUT CHART  –  lightweight Cairo ring gauge
-# ═════════════════════════════════════════════════════════════════════════════
-_TWO_PI = 2 * math.pi
-
 _NVIDIA_SMI = None
 _DBUS_TIMEOUT = 5
+_REFRESH_MS = 5000
+_HISTORY_SAMPLES = 120  # 120 × 5 seconds = 10 minutes
 _dbus_pool = concurrent.futures.ThreadPoolExecutor(max_workers=2, thread_name_prefix="dash-dbus")
 
 def _dbus_call(fn, *args, timeout=_DBUS_TIMEOUT):
@@ -45,13 +44,19 @@ class DashboardPage(Gtk.Box):
         self.services = services or {}
         self.on_navigate = on_navigate
         self._timer_id = None
+        self._start_timer_id = None
         self._cpu_prev = None       # (total, idle) for delta calc
         self._cpu_smooth = 0.0      # EMA-smoothed CPU %
         self._data = {}             # latest bg-fetched snapshot
         self._busy = False          # guard against overlapping bg threads
         self._temp_unit = "C"       # temperature unit preference
+        self._dark = False
         self._gpu_runtime_status_path = None
         self._gpu_runtime_status_scanned = False
+        self._telemetry_history = HistoryBuffer(
+            ("cpu_temp", "gpu_temp", "fan_1", "fan_2"),
+            capacity=_HISTORY_SAMPLES,
+        )
 
         global _NVIDIA_SMI
         if _NVIDIA_SMI is None:
@@ -59,9 +64,10 @@ class DashboardPage(Gtk.Box):
 
         self._build()
         # Delay the first tick to avoid resource contention during app startup
-        GLib.timeout_add(1500, self._initial_start)
+        self._start_timer_id = GLib.timeout_add(1500, self._initial_start)
 
     def _initial_start(self):
+        self._start_timer_id = None
         self._tick()
         self._timer_id = GLib.timeout_add(_REFRESH_MS, self._tick)
         return False
@@ -82,6 +88,17 @@ class DashboardPage(Gtk.Box):
 
     def set_temp_unit(self, unit):
         self._temp_unit = unit
+        for graph in (getattr(self, "_temp_history_graph", None),
+                      getattr(self, "_fan_history_graph", None)):
+            if graph is not None:
+                graph.set_temp_unit(unit)
+
+    def set_dark(self, is_dark):
+        self._dark = bool(is_dark)
+        for graph in (getattr(self, "_temp_history_graph", None),
+                      getattr(self, "_fan_history_graph", None)):
+            if graph is not None:
+                graph.set_dark(self._dark)
 
     def _format_temp(self, celsius):
         """Format temperature value for display in the user's preferred unit."""
@@ -90,6 +107,9 @@ class DashboardPage(Gtk.Box):
         return f"{int(celsius)}°C"
 
     def cleanup(self):
+        if self._start_timer_id:
+            GLib.source_remove(self._start_timer_id)
+            self._start_timer_id = None
         if self._timer_id:
             GLib.source_remove(self._timer_id)
             self._timer_id = None
@@ -123,6 +143,85 @@ class DashboardPage(Gtk.Box):
         self._top_row = top_row
         root.append(top_row)
 
+        root.append(self._mk_telemetry_history())
+
+    def _mk_telemetry_history(self):
+        card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        card.add_css_class("card")
+        self._telemetry_card = card
+
+        title_row = Gtk.Box(spacing=10)
+        title_row.append(self._heading(T("live_telemetry")))
+        title_row.append(Gtk.Label(hexpand=True))
+        badge = Gtk.Label(label=T("last_10_minutes"))
+        badge.add_css_class("osd")
+        title_row.append(badge)
+        card.append(title_row)
+        card.append(Gtk.Separator())
+
+        self._temp_history_label = self._telemetry_series_header(
+            card, T("temperature_history"))
+        temp_frame = Gtk.Box()
+        temp_frame.add_css_class("inner-panel")
+        self._temp_history_graph = TelemetryGraph(
+            self._telemetry_history,
+            (
+                ("cpu_temp", "CPU", (0.61, 0.39, 1.0)),
+                ("gpu_temp", "GPU", (1.0, 0.42, 0.30)),
+            ),
+            kind="temperature",
+            past_label=T("ten_minutes_ago"),
+            now_label=T("now"),
+        )
+        self._temp_history_graph.set_dark(self._dark)
+        temp_frame.append(self._temp_history_graph)
+        card.append(temp_frame)
+
+        self._fan_history_label = self._telemetry_series_header(
+            card, T("fan_speed_history"))
+        fan_frame = Gtk.Box()
+        fan_frame.add_css_class("inner-panel")
+        self._fan_history_graph = TelemetryGraph(
+            self._telemetry_history,
+            (
+                ("fan_1", T("fan_1"), (0.18, 0.76, 0.49)),
+                ("fan_2", T("fan_2"), (0.20, 0.64, 0.94)),
+            ),
+            kind="rpm",
+            past_label=T("ten_minutes_ago"),
+            now_label=T("now"),
+        )
+        self._fan_history_graph.set_dark(self._dark)
+        fan_frame.append(self._fan_history_graph)
+        card.append(fan_frame)
+        self._update_telemetry_labels(None, None, None, None)
+        return card
+
+    @staticmethod
+    def _telemetry_series_header(parent, title):
+        row = Gtk.Box(spacing=10)
+        heading = Gtk.Label(label=title, xalign=0, css_classes=["heading"])
+        row.append(heading)
+        row.append(Gtk.Label(hexpand=True))
+        values = Gtk.Label(xalign=1, use_markup=True, css_classes=["title-4"])
+        row.append(values)
+        parent.append(row)
+        return values
+
+    def _update_telemetry_labels(self, cpu_temp, gpu_temp, fan_1, fan_2):
+        def temp(value):
+            return self._format_temp(value) if value is not None else "—"
+
+        def rpm(value):
+            return f"{int(value)} RPM" if value is not None else "—"
+
+        self._temp_history_label.set_markup(
+            f"<span foreground='#9d65ff'>●</span> CPU {temp(cpu_temp)}   "
+            f"<span foreground='#ff6b4d'>●</span> GPU {temp(gpu_temp)}")
+        self._fan_history_label.set_markup(
+            f"<span foreground='#2ec27e'>●</span> {T('fan_1')} {rpm(fan_1)}   "
+            f"<span foreground='#33a3f0'>●</span> {T('fan_2')} {rpm(fan_2)}")
+
     def set_ui_scale(self, bucket, _width=0, _height=0):
         root = getattr(self, "_root_box", None)
         if root is not None:
@@ -148,6 +247,14 @@ class DashboardPage(Gtk.Box):
         row = getattr(self, "_top_row", None)
         if row is not None:
             row.set_spacing(12 if bucket == "compact" else 22 if bucket == "spacious" else 18)
+            row.set_orientation(
+                Gtk.Orientation.VERTICAL if bucket == "compact" else Gtk.Orientation.HORIZONTAL)
+
+        graph_height = 130 if bucket == "compact" else 190 if bucket == "spacious" else 160
+        for graph in (getattr(self, "_temp_history_graph", None),
+                      getattr(self, "_fan_history_graph", None)):
+            if graph is not None:
+                graph.set_content_height(graph_height)
 
         ring_size = 124 if bucket == "compact" else 160 if bucket == "spacious" else 146
         for ring in (getattr(self, "_cpu_temp", None), getattr(self, "_gpu_temp", None)):
@@ -458,7 +565,9 @@ class DashboardPage(Gtk.Box):
     # ═════════════════════════════════════════════════════════════════════════
     def _tick(self):
         # Eğer bu fonksiyon yanlışlıkla idle_add ile çağrılırsa sonsuz döngüye girmesin.
-        if not self.get_mapped() or self._busy:
+        # Keep collecting while the page is hidden so opening Dashboard shows
+        # real recent history instead of an empty chart.
+        if self._busy:
             return GLib.SOURCE_CONTINUE
             
         self._busy = True
@@ -651,8 +760,9 @@ class DashboardPage(Gtk.Box):
             elif active_p == "performance":
                 ui_mode = "performance"
             
-            if ui_mode in self._perf_btns:
-                btn = self._perf_btns[ui_mode]
+            perf_buttons = getattr(self, "_perf_btns", {})
+            if ui_mode in perf_buttons:
+                btn = perf_buttons[ui_mode]
                 if not btn.get_active():
                     self._block_perf_sync = True
                     btn.set_active(True)
@@ -660,22 +770,38 @@ class DashboardPage(Gtk.Box):
 
         # Conflict check
         conflict = d.get("power_conflict")
-        if conflict:
-            self._conflict_lbl.set_markup(f"<b>Conflict Detected:</b> {conflict}.service is running, which may override OmenCtl.")
-            self._conflict_row.set_visible(True)
-        else:
-            self._conflict_row.set_visible(False)
+        conflict_label = getattr(self, "_conflict_lbl", None)
+        conflict_row = getattr(self, "_conflict_row", None)
+        if conflict_label is not None and conflict_row is not None:
+            if conflict:
+                conflict_label.set_markup(f"<b>Conflict Detected:</b> {conflict}.service is running, which may override OmenCtl.")
+                conflict_row.set_visible(True)
+            else:
+                conflict_row.set_visible(False)
 
         fan = d.get("fan", {})
         fm = fan.get("mode", "auto").capitalize()
         fans = fan.get("fans", {})
         rpms = []
-        for fid in sorted(fans.keys()):
-            r = fans[fid].get("current", 0)
+        fan_values = []
+        for fid in sorted(fans.keys(), key=str):
+            r = fans[fid].get("current")
+            fan_values.append(r if isinstance(r, (int, float)) else None)
+            r = r or 0
             if r > 0:
                 rpms.append(str(r))
         rpm_str = "/".join(rpms) if rpms else "0"
         self._fan_lbl.set_label(f"{fm} • {rpm_str} RPM")
+
+        cpu_temp = d.get("cpu_temp") or None
+        gpu_temp = d.get("gpu_temp") or None
+        fan_1 = fan_values[0] if fan_values else None
+        fan_2 = fan_values[1] if len(fan_values) > 1 else None
+        self._telemetry_history.push(
+            cpu_temp=cpu_temp, gpu_temp=gpu_temp, fan_1=fan_1, fan_2=fan_2)
+        self._temp_history_graph.refresh()
+        self._fan_history_graph.refresh()
+        self._update_telemetry_labels(cpu_temp, gpu_temp, fan_1, fan_2)
 
         return False  # idle_add one-shot
 

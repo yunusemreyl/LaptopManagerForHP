@@ -1,0 +1,12 @@
+[Icon Theme]
+Name=OmenCtl bundled icons
+Comment=Theme-independent symbolic icons for OmenCtl
+Directories=scalable/actions
+Inherits=hicolor
+
+[scalable/actions]
+Size=24
+Context=Actions
+Type=Scalable
+MinSize=16
+MaxSize=128

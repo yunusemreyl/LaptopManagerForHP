@@ -6,6 +6,7 @@ from utils.diagnostics import generate_diagnostic_report, generate_github_issue_
 import gi
 gi.require_version('Gtk', '4.0')
 from gi.repository import Gtk, GLib, Gdk
+from icon_utils import make_icon, make_icon_label
 from widgets.smooth_scroll import SmoothScrolledWindow
 from widgets.mapping_wizard import MappingWizard
 
@@ -338,26 +339,32 @@ class SettingsPage(Gtk.Box):
 
     # ── Helpers ───────────────────────────────────────────────────────────────
 
-    def _make_section_header(self, emoji, title_text):
-        """Create a section header with title and prefixed emoji."""
+    def _make_section_header(self, icon_key, title_text):
+        """Create a section header with a bundled symbolic icon."""
         hbox = Gtk.Box(spacing=8, valign=Gtk.Align.CENTER, halign=Gtk.Align.START)
-        
-        full_title = f"{emoji}  {title_text}" if emoji else title_text
-        lbl = Gtk.Label(label=full_title, xalign=0, halign=Gtk.Align.START)
+
+        if icon_key:
+            hbox.append(make_icon(icon_key, 17))
+        lbl = Gtk.Label(label=title_text, xalign=0, halign=Gtk.Align.START)
         lbl.add_css_class("section-title")
         hbox.append(lbl)
         return hbox
 
-    def _make_settings_row(self, emoji, label_text, control_widget, sublabel=None, bg_class=None):
-        """Create a standard settings row with prefixed emoji: label | control."""
+    def _make_settings_row(self, icon_key, label_text, control_widget, sublabel=None, bg_class=None):
+        """Create a standard settings row with a bundled symbolic icon."""
         row = Gtk.Box(spacing=12, valign=Gtk.Align.CENTER)
         row.add_css_class("settings-row")
 
-        full_label = f"{emoji}  {label_text}" if emoji else label_text
+        if icon_key:
+            icon = make_icon(icon_key, 19)
+            icon.add_css_class("settings-row-icon")
+            if bg_class:
+                icon.add_css_class(bg_class)
+            row.append(icon)
 
         # Text column vertically centered and left-aligned
         text_col = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1, hexpand=True, valign=Gtk.Align.CENTER)
-        main_lbl = Gtk.Label(label=full_label, xalign=0, halign=Gtk.Align.START)
+        main_lbl = Gtk.Label(label=label_text, xalign=0, halign=Gtk.Align.START)
         main_lbl.add_css_class("settings-row-label")
         text_col.append(main_lbl)
         if sublabel:
@@ -376,16 +383,17 @@ class SettingsPage(Gtk.Box):
         sep.add_css_class("settings-sep")
         return sep
 
-    def _make_driver_row(self, emoji, driver_name, is_loaded):
-        """Create a driver status row with prefixed emoji."""
+    def _make_driver_row(self, icon_key, driver_name, is_loaded):
+        """Create a driver status row with a bundled symbolic icon."""
         row = Gtk.Box(spacing=12, valign=Gtk.Align.CENTER)
         row.add_css_class("settings-row")
 
-        full_name = f"{emoji}  {driver_name}" if emoji else driver_name
+        if icon_key:
+            row.append(make_icon(icon_key, 19))
 
         # Text vertically centered and left-aligned
         text_col = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1, hexpand=True, valign=Gtk.Align.CENTER)
-        name_lbl = Gtk.Label(label=full_name, xalign=0, halign=Gtk.Align.START)
+        name_lbl = Gtk.Label(label=driver_name, xalign=0, halign=Gtk.Align.START)
         name_lbl.add_css_class("driver-name")
         text_col.append(name_lbl)
         row.append(text_col)
@@ -420,14 +428,14 @@ class SettingsPage(Gtk.Box):
         appear_card.add_css_class("card-pref")
         self._appear_card = appear_card
 
-        content.append(self._make_section_header("🎨", T("appearance")))
+        content.append(self._make_section_header("appearance", T("appearance")))
 
         # Theme row
         self.theme_dd = Gtk.DropDown(model=Gtk.StringList.new(
             [T("dark"), T("light"), T("system")]))
         self.theme_dd.connect("notify::selected", self._on_theme)
         appear_card.append(self._make_settings_row(
-            "🌓", T("theme"), self.theme_dd, bg_class="icon-bg-theme"))
+            "theme", T("theme"), self.theme_dd, bg_class="icon-bg-theme"))
 
         appear_card.append(self._make_sep())
 
@@ -435,7 +443,7 @@ class SettingsPage(Gtk.Box):
         self.lang_dd = Gtk.DropDown(model=Gtk.StringList.new(["Türkçe", "English"]))
         self.lang_dd.connect("notify::selected", self._on_lang)
         appear_card.append(self._make_settings_row(
-            "🌐", T("lang_label"), self.lang_dd, bg_class="icon-bg-lang"))
+            "language", T("lang_label"), self.lang_dd, bg_class="icon-bg-lang"))
 
         appear_card.append(self._make_sep())
 
@@ -444,7 +452,7 @@ class SettingsPage(Gtk.Box):
             [T("celsius"), T("fahrenheit")]))
         self.temp_dd.connect("notify::selected", self._on_temp_unit)
         appear_card.append(self._make_settings_row(
-            "🌡️", T("temp_unit"), self.temp_dd, bg_class="icon-bg-temp"))
+            "temperature", T("temp_unit"), self.temp_dd, bg_class="icon-bg-temp"))
 
         appear_card.append(self._make_sep())
 
@@ -456,7 +464,7 @@ class SettingsPage(Gtk.Box):
         self.autostart_switch.set_active(os.path.exists(desktop_file))
         autostart_lbl = T("autostart") if "autostart" in globals() else "Autostart on login"
         appear_card.append(self._make_settings_row(
-            "🚀", autostart_lbl, self.autostart_switch, bg_class="icon-bg-sys"))
+            "autostart", autostart_lbl, self.autostart_switch, bg_class="icon-bg-sys"))
 
         content.append(appear_card)
 
@@ -468,7 +476,7 @@ class SettingsPage(Gtk.Box):
         update_card.add_css_class("card-update")
         self._update_card = update_card
 
-        content.append(self._make_section_header("🔄", T("updates")))
+        content.append(self._make_section_header("update", T("updates")))
 
         update_row = Gtk.Box(spacing=12, valign=Gtk.Align.CENTER)
         update_row.add_css_class("settings-row")
@@ -477,7 +485,7 @@ class SettingsPage(Gtk.Box):
         # Version info left side (Vertically centered)
         ver_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1, hexpand=True, valign=Gtk.Align.CENTER)
         ver_lbl = Gtk.Label(
-            label=f"🚀  OmenCtl v{APP_VERSION}", xalign=0, halign=Gtk.Align.START)
+            label=f"OmenCtl v{APP_VERSION}", xalign=0, halign=Gtk.Align.START)
         ver_lbl.add_css_class("update-ver-label")
         ver_box.append(ver_lbl)
 
@@ -535,18 +543,18 @@ class SettingsPage(Gtk.Box):
         info_card.add_css_class("card-sys")
         self._info_card = info_card
 
-        content.append(self._make_section_header("💻", T("sys_info")))
+        content.append(self._make_section_header("system_info", T("sys_info")))
 
         # System info rows with emojis
         sys_info = [
-            ("🖥️",           T("computer"),  platform.node(),       "icon-bg-theme"),
-            ("⚙️",           T("kernel"),    platform.release(),    "icon-bg-mux"),
-            ("🐧",           T("os_name"),   self._get_distro(),    "icon-bg-lang"),
-            ("🔌",           T("arch"),      platform.machine(),    "icon-bg-sys"),
+            ("computer",     T("computer"),  platform.node(),       "icon-bg-theme"),
+            ("kernel",       T("kernel"),    platform.release(),    "icon-bg-mux"),
+            ("os",           T("os_name"),   self._get_distro(),    "icon-bg-lang"),
+            ("architecture", T("arch"),      platform.machine(),    "icon-bg-sys"),
         ]
         
-        for idx, (emoji, label, value, bg_class) in enumerate(sys_info):
-            row = self._make_settings_row(emoji, label, Gtk.Box(), sublabel=value, bg_class=bg_class)
+        for idx, (icon_key, label, value, bg_class) in enumerate(sys_info):
+            row = self._make_settings_row(icon_key, label, Gtk.Box(), sublabel=value, bg_class=bg_class)
             info_card.append(row)
             if idx < len(sys_info) - 1:
                 info_card.append(self._make_sep())
@@ -560,9 +568,9 @@ class SettingsPage(Gtk.Box):
         # Store as _driver_card for set_ui_scale compatibility
         self._driver_card = info_card
 
-        info_card.append(self._make_driver_row("💡", "hp-rgb-lighting", hp_rgb_loaded))
+        info_card.append(self._make_driver_row("lighting", "hp-rgb-lighting", hp_rgb_loaded))
         info_card.append(self._make_sep())
-        info_card.append(self._make_driver_row("🌪️", "hp-wmi (Fan/Thermal/Key)", hp_wmi_loaded))
+        info_card.append(self._make_driver_row("fan", "hp-wmi (Fan/Thermal/Key)", hp_wmi_loaded))
 
         content.append(info_card)
 
@@ -574,12 +582,12 @@ class SettingsPage(Gtk.Box):
         mux_card.add_css_class("card-mux")
         self._mux_card = mux_card
 
-        content.append(self._make_section_header("🎮", T("gpu_mux_label")))
+        content.append(self._make_section_header("gpu", T("gpu_mux_label")))
 
         self.mux_dd = Gtk.DropDown(model=Gtk.StringList.new([T("mux_auto")]))
         self.mux_dd.connect("notify::selected", self._on_mux_backend)
         mux_card.append(self._make_settings_row(
-            "🏎️", T("mux_backend_label"), self.mux_dd, bg_class="icon-bg-mux"))
+            "mux", T("mux_backend_label"), self.mux_dd, bg_class="icon-bg-mux"))
 
         self.mux_status = Gtk.Label(label="", xalign=0, halign=Gtk.Align.START)
         self.mux_status.add_css_class("settings-row-sublabel")
@@ -597,7 +605,7 @@ class SettingsPage(Gtk.Box):
         debug_card.add_css_class("card-diag")
         self._debug_card = debug_card
 
-        content.append(self._make_section_header("🩺", T("debug_info_title")))
+        content.append(self._make_section_header("diagnostics", T("debug_info_title")))
 
         dump_btn = Gtk.Button()
         dump_btn.add_css_class("settings-row")
@@ -605,11 +613,12 @@ class SettingsPage(Gtk.Box):
         
         dump_inner = Gtk.Box(spacing=12, valign=Gtk.Align.CENTER)
         
-        dump_lbl = Gtk.Label(label=f"📟  {T('troubleshooting_dump')}", xalign=0, hexpand=True, valign=Gtk.Align.CENTER)
+        dump_inner.append(make_icon("terminal", 18))
+        dump_lbl = Gtk.Label(label=T('troubleshooting_dump'), xalign=0, hexpand=True, valign=Gtk.Align.CENTER)
         dump_lbl.add_css_class("settings-row-label")
         dump_inner.append(dump_lbl)
 
-        chevron1 = Gtk.Image.new_from_icon_name("go-next-symbolic")
+        chevron1 = make_icon("chevron", 16)
         chevron1.add_css_class("chevron-arrow")
         dump_inner.append(chevron1)
         dump_btn.set_child(dump_inner)
@@ -681,11 +690,12 @@ class SettingsPage(Gtk.Box):
         about_card.append(self._make_sep())
 
         # Disclaimer (Left-aligned, flush left)
-        disclaimer_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, halign=Gtk.Align.START)
+        disclaimer_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8, halign=Gtk.Align.START)
         disclaimer_box.add_css_class("about-disclaimer-box")
         disclaimer_box.set_margin_start(4)
+        disclaimer_box.append(make_icon("legal", 18))
         disclaimer_lbl = Gtk.Label(
-            label=f"⚖️  {T('disclaimer')}", use_markup=True, xalign=0.0, wrap=True, halign=Gtk.Align.START)
+            label=T('disclaimer'), use_markup=True, xalign=0.0, wrap=True, halign=Gtk.Align.START)
         disclaimer_lbl.add_css_class("about-disclaimer")
         disclaimer_box.append(disclaimer_lbl)
         about_card.append(disclaimer_box)
@@ -719,7 +729,8 @@ class SettingsPage(Gtk.Box):
         header.set_margin_start(16)
         header.set_margin_end(16)
         
-        back_btn = Gtk.Button(label=f"⬅️ {T('back')}")
+        back_btn = Gtk.Button()
+        back_btn.set_child(make_icon_label("back", T('back')))
         back_btn.add_css_class("suggested-action")
         back_btn.connect("clicked", lambda *_: self.main_stack.set_visible_child_name("main"))
         header.append(back_btn)
@@ -728,7 +739,8 @@ class SettingsPage(Gtk.Box):
         title_lbl.add_css_class("settings-row-label")
         header.append(title_lbl)
         
-        self.github_issue_btn = Gtk.Button(label=f"🚀 {T('send_to_github')}")
+        self.github_issue_btn = Gtk.Button()
+        self.github_issue_btn.set_child(make_icon_label("github", T('send_to_github')))
         self.github_issue_btn.add_css_class("suggested-action")
         self.github_issue_btn.connect("clicked", self._create_github_issue)
         header.append(self.github_issue_btn)
@@ -799,7 +811,7 @@ class SettingsPage(Gtk.Box):
         
         # System Table
         sys_data = data.get("system", {})
-        self.dump_content.append(self._make_section_header("💻", T("sys_info")))
+        self.dump_content.append(self._make_section_header("system_info", T("sys_info")))
         
         sys_grid = Gtk.Grid(row_spacing=8, column_spacing=16)
         sys_grid.set_halign(Gtk.Align.CENTER)
@@ -824,7 +836,7 @@ class SettingsPage(Gtk.Box):
         # Capabilities Table
         cap_data = data.get("capabilities", {})
         if cap_data:
-            self.dump_content.append(self._make_section_header("⚙️", "Donanım Yetenekleri"))
+            self.dump_content.append(self._make_section_header("settings", "Donanım Yetenekleri"))
             cap_grid = Gtk.Grid(row_spacing=8, column_spacing=16)
             cap_grid.set_halign(Gtk.Align.CENTER)
             row = 0
@@ -846,7 +858,7 @@ class SettingsPage(Gtk.Box):
         acpi = data.get("acpi", {})
         methods = acpi.get("methods_found", {})
         
-        self.dump_content.append(self._make_section_header("🔍", "ACPI / DSDT Mappings"))
+        self.dump_content.append(self._make_section_header("diagnostics", "ACPI / DSDT Mappings"))
         grid = Gtk.Grid(row_spacing=8, column_spacing=16)
         grid.set_halign(Gtk.Align.CENTER)
         
@@ -875,7 +887,7 @@ class SettingsPage(Gtk.Box):
         # Errors in bash
         errors = acpi.get("errors", [])
         if errors:
-            self.dump_content.append(self._make_section_header("⚠️", "Hatalar / Çıktılar"))
+            self.dump_content.append(self._make_section_header("warning", "Hatalar / Çıktılar"))
             
             tv = Gtk.TextView()
             tv.set_editable(False)

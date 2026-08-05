@@ -48,6 +48,7 @@ else:
 sys.path.insert(0, BASE_DIR)
 sys.path.insert(0, os.path.dirname(BASE_DIR))
 
+from icon_utils import ensure_icon_theme, icon_name, make_icon
 from pages.fan_page import FanPage
 from pages.lighting_page import LightingPage
 from pages.mux_page import MUXPage
@@ -308,6 +309,7 @@ class HPManagerWindow(Gtk.ApplicationWindow):
         icon_theme = Gtk.IconTheme.get_for_display(display)
         if IMAGES_DIR not in icon_theme.get_search_path():
             icon_theme.add_search_path(IMAGES_DIR)
+        ensure_icon_theme()
 
         self.set_icon_name("omenctl")
 
@@ -394,9 +396,7 @@ class HPManagerWindow(Gtk.ApplicationWindow):
                 except Exception:
                     pass
 
-        fallback = Gtk.Image.new_from_icon_name("computer-symbolic")
-        fallback.set_pixel_size(size)
-        return fallback
+        return make_icon("computer", size)
 
     @staticmethod
     def _human_storage(value_bytes):
@@ -2117,12 +2117,12 @@ class HPManagerWindow(Gtk.ApplicationWindow):
 
         # ── Navigation items (excluding Settings) ──
         nav_items = [
-            ("fan",       self.page_titles["fan"],       ["system-run-symbolic", "media-playback-start-symbolic", "applications-system-symbolic"]),
-            ("lighting",  self.page_titles["lighting"],  ["preferences-color-symbolic", "applications-graphics-symbolic", "color-management-symbolic"]),
-            ("power",     self.page_titles["power"],     ["battery-symbolic", "ac-adapter-symbolic", "power-profile-balanced-symbolic"]),
-            ("keyboard",  self.page_titles["keyboard"],  ["preferences-desktop-keyboard-symbolic", "input-keyboard-symbolic"]),
-            ("app_profiles", self.page_titles["app_profiles"], ["applications-system-symbolic", "preferences-system-symbolic"]),
-            ("mux",       "MUX",                        ["display-symbolic", "video-display-symbolic", "computer-symbolic"]),
+            ("fan",          self.page_titles["fan"],          "fan"),
+            ("lighting",     self.page_titles["lighting"],     "lighting"),
+            ("power",        self.page_titles["power"],        "power"),
+            ("keyboard",     self.page_titles["keyboard"],     "keyboard"),
+            ("app_profiles", self.page_titles["app_profiles"], "app_profiles"),
+            ("mux",          "MUX",                            "mux"),
         ]
 
         self.nav_indicators = {}
@@ -2143,7 +2143,7 @@ class HPManagerWindow(Gtk.ApplicationWindow):
         bottom_nav_box.append(self.theme_toggle_btn)
 
         # Settings button
-        self.settings_btn = self._make_nav_button("settings", self.page_titles["settings"], ["emblem-system-symbolic", "preferences-system-symbolic", "applications-system-symbolic"])
+        self.settings_btn = self._make_nav_button("settings", self.page_titles["settings"], "settings")
         bottom_nav_box.append(self.settings_btn)
 
         sidebar.append(bottom_nav_box)
@@ -2381,13 +2381,6 @@ class HPManagerWindow(Gtk.ApplicationWindow):
             "gpu": "GPU",
             "ram": "RAM",
         }
-        icons = {
-            "cpu": ["processor-symbolic", "cpu-symbolic"],
-            "disk": ["drive-harddisk-symbolic"],
-            "gpu": ["display-symbolic", "video-display-symbolic", "computer-symbolic"],
-            "ram": ["media-memory-symbolic", "media-flash-symbolic"],
-        }
-
         spec_row = Gtk.Box(spacing=8, homogeneous=True)
         spec_row.add_css_class("home-spec-row")
         self._home_spec_row = spec_row
@@ -2395,9 +2388,7 @@ class HPManagerWindow(Gtk.ApplicationWindow):
             item = Gtk.Box(spacing=6)
             item.add_css_class("home-spec-item")
 
-            gicon = Gio.ThemedIcon.new_from_names(icons[key])
-            ico = Gtk.Image.new_from_gicon(gicon)
-            ico.set_pixel_size(14)
+            ico = make_icon("memory" if key == "ram" else key, 14)
             item.append(ico)
 
             txt_col = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
@@ -2713,17 +2704,13 @@ class HPManagerWindow(Gtk.ApplicationWindow):
         return btn
 
     def _make_fixed_menu_icon(self, icon_key, size):
-        dark = self._is_effective_dark()
-        rgb = (0.92, 0.94, 0.97) if dark else (0.16, 0.18, 0.22)
-        return FixedMenuIcon(icon_key, size=size, rgb=rgb)
+        return make_icon(icon_key, size)
 
     def _build_menu_back_content(self):
         row = Gtk.Box()
         row.set_halign(Gtk.Align.CENTER)
         row.set_valign(Gtk.Align.CENTER)
-        dark = self._is_effective_dark()
-        rgb = (1.0, 1.0, 1.0) if dark else (0.16, 0.18, 0.22)
-        row.append(FixedMenuIcon("back", size=18, rgb=rgb, line_width=2.8))
+        row.append(make_icon("back", 18))
         return row
 
     def _is_effective_dark(self):
@@ -2808,12 +2795,7 @@ class HPManagerWindow(Gtk.ApplicationWindow):
         box.append(indicator)
         self.nav_indicators[page_id] = indicator
 
-        if isinstance(icon_names, (list, tuple)):
-            gicon = Gio.ThemedIcon.new_from_names(list(icon_names))
-            icon = Gtk.Image.new_from_gicon(gicon)
-        else:
-            icon = Gtk.Image.new_from_icon_name(icon_names)
-        icon.set_pixel_size(24)
+        icon = make_icon(icon_names, 24)
         icon.add_css_class("nav-icon")
         icon.set_valign(Gtk.Align.CENTER)
         box.append(icon)
@@ -2900,8 +2882,7 @@ class HPManagerWindow(Gtk.ApplicationWindow):
         if not hasattr(self, "theme_toggle_icon") or self.theme_toggle_icon is None:
             return
         is_dark = self._is_dark_mode()
-        icon_name = "weather-clear-symbolic" if is_dark else "weather-clear-night-symbolic"
-        self.theme_toggle_icon.set_from_icon_name(icon_name)
+        self.theme_toggle_icon.set_from_icon_name(icon_name("appearance" if is_dark else "theme"))
         lbl_text = T("light") if is_dark else T("dark")
         if hasattr(self, "theme_toggle_lbl") and self.theme_toggle_lbl is not None:
             self.theme_toggle_lbl.set_label(lbl_text)

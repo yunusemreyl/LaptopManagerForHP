@@ -7,11 +7,12 @@ import shutil
 import sys
 import gi
 gi.require_version('Gtk', '4.0')
-from gi.repository import Gtk, GLib, Gio
+from gi.repository import Gtk, GLib
 
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
+from icon_utils import make_icon
 
 
 def T(k):
@@ -113,8 +114,7 @@ class MUXPage(Gtk.Box):
         self.gpu_card.add_css_class("card")
 
         gpu_header = Gtk.Box(spacing=10)
-        disp_icon = Gio.ThemedIcon.new_from_names(["display-symbolic", "video-display-symbolic", "computer-symbolic"])
-        gpu_header.append(Gtk.Image.new_from_gicon(disp_icon))
+        gpu_header.append(make_icon("gpu", 22))
         gpu_header.append(Gtk.Label(label=T("gpu_info"),
                                     css_classes=["section-title"]))
         self.gpu_card.append(gpu_header)
@@ -163,7 +163,7 @@ class MUXPage(Gtk.Box):
         card.add_css_class("card")
 
         header = Gtk.Box(spacing=10)
-        header.append(Gtk.Image.new_from_gicon(disp_icon))
+        header.append(make_icon("gpu", 22))
         header.append(Gtk.Label(label=T("gpu_mode"), css_classes=["section-title"]))
         card.append(header)
 
@@ -174,7 +174,7 @@ class MUXPage(Gtk.Box):
         # ── Hybrid (group anchor) ──────────────────────────────────────────────
         self.hybrid_outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL,
                                     spacing=10, halign=Gtk.Align.CENTER)
-        hybrid_icon = Gtk.Image.new_from_icon_name("preferences-system-symbolic")
+        hybrid_icon = make_icon("applications", 26)
         hybrid_icon.set_pixel_size(80)
         self._hybrid_icon = hybrid_icon
         self.btn_hybrid = Gtk.ToggleButton(child=hybrid_icon)
@@ -195,7 +195,7 @@ class MUXPage(Gtk.Box):
         # ── Discrete ──────────────────────────────────────────────────────────
         self.dgpu_outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL,
                                   spacing=10, halign=Gtk.Align.CENTER)
-        dgpu_icon = Gtk.Image.new_from_gicon(disp_icon)
+        dgpu_icon = make_icon("gpu", 26)
         dgpu_icon.set_pixel_size(80)
         dgpu_icon.set_halign(Gtk.Align.CENTER)
         self._dgpu_icon = dgpu_icon
@@ -232,7 +232,7 @@ class MUXPage(Gtk.Box):
         self.warn_card.set_margin_top(10)
         self.warn_card.set_visible(False)
         warn_row = Gtk.Box(spacing=10, halign=Gtk.Align.CENTER)
-        warn_row.append(Gtk.Image.new_from_icon_name("dialog-warning-symbolic"))
+        warn_row.append(make_icon("warning", 18))
         warn_row.append(Gtk.Label(label=T("restart_warn"),
                                   css_classes=["warning-sub"]))
         self.warn_card.append(warn_row)
@@ -243,7 +243,7 @@ class MUXPage(Gtk.Box):
                                      spacing=15, halign=Gtk.Align.CENTER)
         self.not_available.add_css_class("warning-box")
         self.not_available.set_visible(False)
-        ic = Gtk.Image.new_from_icon_name("dialog-warning-symbolic")
+        ic = make_icon("warning", 18)
         ic.set_pixel_size(48)
         self.not_available.append(ic)
         self.not_available.append(

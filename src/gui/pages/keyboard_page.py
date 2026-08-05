@@ -9,6 +9,7 @@ from gi.repository import Gtk, GLib
 import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
+from icon_utils import make_icon
 
 def T(k):
     from i18n import T as _T
@@ -86,7 +87,7 @@ class KeyboardPage(Gtk.Box):
         self._fix_card = fix_card
         
         fix_header = Gtk.Box(spacing=10)
-        fix_header.append(Gtk.Image.new_from_icon_name("system-run-symbolic"))
+        fix_header.append(make_icon("settings", 20))
         fix_header.append(Gtk.Label(label=T("driver_status"), xalign=0, css_classes=["heading"]))
         fix_card.append(fix_header)
 
@@ -120,7 +121,7 @@ class KeyboardPage(Gtk.Box):
         self._macro_card = macro_card
         
         macro_header = Gtk.Box(spacing=10)
-        macro_header.append(Gtk.Image.new_from_icon_name("preferences-desktop-keyboard-shortcuts-symbolic"))
+        macro_header.append(make_icon("keyboard", 20))
         macro_header.append(Gtk.Label(label="Macros & Commands", xalign=0, css_classes=["heading"]))
         macro_card.append(macro_header)
         
@@ -137,7 +138,8 @@ class KeyboardPage(Gtk.Box):
             self.macro_entries[m_id] = entry
             m_box.append(entry)
             
-            btn = Gtk.Button(icon_name="application-x-executable-symbolic")
+            btn = Gtk.Button()
+            btn.set_child(make_icon("application", 18))
             btn.set_tooltip_text("Choose installed application")
             btn.connect("clicked", lambda b, e=entry: self._show_app_chooser(e))
             m_box.append(btn)
@@ -200,9 +202,9 @@ class KeyboardPage(Gtk.Box):
                 texture = Gdk.Texture.new_from_filename(icon_name)
                 icon = Gtk.Image.new_from_paintable(texture)
             else:
-                icon = Gtk.Image.new_from_icon_name("image-missing")
+                icon = make_icon("application", 20)
         else:
-            icon = Gtk.Image.new_from_icon_name(icon_name)
+            icon = make_icon("application", 20, fallback=icon_name)
         icon.set_pixel_size(24)
         row.append(icon)
         
@@ -299,7 +301,7 @@ class KeyboardPage(Gtk.Box):
                     if icon:
                         img = Gtk.Image.new_from_gicon(icon)
                     else:
-                        img = Gtk.Image.new_from_icon_name("application-x-executable")
+                        img = make_icon("application", 20)
                     img.set_pixel_size(32)
                     hbox.append(img)
                     
@@ -326,4 +328,3 @@ class KeyboardPage(Gtk.Box):
 
         dialog = AppChooserDialog(self.get_root(), entry_widget)
         dialog.present()
-

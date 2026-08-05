@@ -46,6 +46,7 @@
 
               mkdir -p $out/share/hp-manager/gui
               mkdir -p $out/share/hp-manager/images
+              mkdir -p $out/share/hp-manager/icons
               mkdir -p $out/libexec/hp-manager
               mkdir -p $out/share/dbus-1/system.d
               mkdir -p $out/lib/systemd/system
@@ -58,6 +59,7 @@
 
               # GUI files
               cp -r src/gui/* $out/share/hp-manager/gui/
+              cp -r data/icons/* $out/share/hp-manager/icons/
               if [ -d images ] && [ "$(ls -A images)" ]; then
                 cp -r images/* $out/share/hp-manager/images/
                 if [ -f images/omenctl.png ]; then

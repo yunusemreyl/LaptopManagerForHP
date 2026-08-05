@@ -10,6 +10,7 @@ import gi, math, json, subprocess, os, shutil, threading, concurrent.futures
 gi.require_version("Gtk", "4.0")
 from gi.repository import Gtk, GLib, Gdk
 from components.custom_widgets import TemperatureRing, CPUSparkline, ResourceBox
+from icon_utils import make_icon
 from widgets.smooth_scroll import SmoothScrolledWindow
 import cairo
 
@@ -237,10 +238,10 @@ class DashboardPage(Gtk.Box):
 
         self._pills = {}
         self._pill_frames = {}
-        for key, icon_name, caption in (
-            ("power", "battery-symbolic",        T("power_profile_label")),
-            ("fan",   "weather-tornado-symbolic", T("fan_mode_label")),
-            ("mux",   "video-display-symbolic",   T("gpu_mux_label")),
+        for key, icon_key, caption in (
+            ("power", "power", T("power_profile_label")),
+            ("fan",   "fan",   T("fan_mode_label")),
+            ("mux",   "mux",   T("gpu_mux_label")),
         ):
             frame = Gtk.Frame()
             frame.add_css_class("pill-frame")
@@ -255,8 +256,7 @@ class DashboardPage(Gtk.Box):
             row.set_margin_start(12)
             row.set_margin_end(12)
 
-            ic = Gtk.Image.new_from_icon_name(icon_name)
-            ic.set_pixel_size(20)
+            ic = make_icon(icon_key, 20)
             ic.set_halign(Gtk.Align.CENTER)
             row.append(ic)
 
@@ -334,13 +334,13 @@ class DashboardPage(Gtk.Box):
         vbox.append(row1)
         # Squeeze height for secondary actions
         self._max_fan_btn = self._mk_action_button(
-            T("max_fan"), "weather-tornado-symbolic", "max_fan", "max-fan-action"
+            T("max_fan"), "fan", "max_fan", "max-fan-action"
         )
         self._max_fan_btn.set_size_request(-1, 50)
         row1.append(self._max_fan_btn)
         
         clean_ram_btn = self._mk_action_button(
-            T("clean_memory"), "edit-clear-all-symbolic", "clean_ram", "clean-ram-action"
+            T("clean_memory"), "clean", "clean_ram", "clean-ram-action"
         )
         clean_ram_btn.set_size_request(-1, 50)
         row1.append(clean_ram_btn)
@@ -375,10 +375,13 @@ class DashboardPage(Gtk.Box):
 
         vbox.append(self._perf_strip)
 
+        self._conflict_row = Gtk.Box(spacing=7, halign=Gtk.Align.CENTER)
+        self._conflict_row.append(make_icon("warning", 16))
         self._conflict_lbl = Gtk.Label(label="", use_markup=True, xalign=0.5, wrap=True)
         self._conflict_lbl.add_css_class("warning-text")
-        self._conflict_lbl.set_visible(False)
-        vbox.append(self._conflict_lbl)
+        self._conflict_row.append(self._conflict_lbl)
+        self._conflict_row.set_visible(False)
+        vbox.append(self._conflict_row)
 
         return card
 
@@ -400,13 +403,12 @@ class DashboardPage(Gtk.Box):
         if self.on_navigate:
             self.on_navigate("fan")
 
-    def _mk_action_button(self, text, icon_name, action_id, css_class):
+    def _mk_action_button(self, text, icon_key, action_id, css_class):
         btn = Gtk.Button(hexpand=True, vexpand=False)
         btn.add_css_class(css_class)
 
         row = Gtk.Box(spacing=8, halign=Gtk.Align.CENTER)
-        ic = Gtk.Image.new_from_icon_name(icon_name)
-        ic.set_pixel_size(16)
+        ic = make_icon(icon_key, 16)
         row.append(ic)
 
         lbl = Gtk.Label(label=text)
@@ -659,10 +661,10 @@ class DashboardPage(Gtk.Box):
         # Conflict check
         conflict = d.get("power_conflict")
         if conflict:
-            self._conflict_lbl.set_markup(f"⚠️ <b>Conflict Detected:</b> {conflict}.service is running, which may override OmenCtl.")
-            self._conflict_lbl.set_visible(True)
+            self._conflict_lbl.set_markup(f"<b>Conflict Detected:</b> {conflict}.service is running, which may override OmenCtl.")
+            self._conflict_row.set_visible(True)
         else:
-            self._conflict_lbl.set_visible(False)
+            self._conflict_row.set_visible(False)
 
         fan = d.get("fan", {})
         fm = fan.get("mode", "auto").capitalize()
@@ -771,4 +773,3 @@ class DashboardPage(Gtk.Box):
             return ""
         with open(path) as f:
             return f.read().strip()
-

@@ -5,6 +5,7 @@ import os, json, colorsys, threading
 import gi
 gi.require_version('Gtk', '4.0')
 from gi.repository import Gtk, Gdk, GLib
+from icon_utils import make_icon
 
 import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -151,7 +152,7 @@ class LightingPage(Gtk.Box):
             return
         banner = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
         banner.add_css_class("card")
-        icon = Gtk.Label(label="⚠")
+        icon = make_icon("warning", 20)
         icon.add_css_class("section-title")
         banner.append(icon)
         lbl = Gtk.Label(label=reason, wrap=True, xalign=0)

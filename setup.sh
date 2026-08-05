@@ -678,6 +678,7 @@ do_install() {
     step "Arayüz (GUI) bileşenleri kopyalanıyor..."
     mkdir -p "$INSTALL_DIR"
     mkdir -p "$DATA_DIR/images"
+    mkdir -p "$DATA_DIR/icons"
     mkdir -p "$CONFIG_DIR"
 
     # Compile and install RyzenAdj
@@ -705,10 +706,16 @@ do_install() {
     mkdir -p "$DATA_DIR/gui/utils"
     cp src/gui/main_window.py "$DATA_DIR/gui/"
     cp src/gui/i18n.py        "$DATA_DIR/gui/"
+    cp src/gui/icon_utils.py  "$DATA_DIR/gui/"
     cp src/gui/pages/*.py     "$DATA_DIR/gui/pages/"
     cp src/gui/widgets/*.py   "$DATA_DIR/gui/widgets/"
     cp src/gui/components/*.py "$DATA_DIR/gui/components/"
     cp src/gui/utils/*.py      "$DATA_DIR/gui/utils/"
+
+    # Bundled symbolic icons (private hicolor search path)
+    if [ -d "data/icons" ]; then
+        cp -r data/icons/* "$DATA_DIR/icons/"
+    fi
 
     # CLI and Tray files
     cp src/omen-cli.py "$INSTALL_DIR/"

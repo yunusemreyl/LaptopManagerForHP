@@ -26,6 +26,7 @@ package() {
   # Install directories
   mkdir -p "$pkgdir/usr/share/hp-manager/gui"
   mkdir -p "$pkgdir/usr/share/hp-manager/images"
+  mkdir -p "$pkgdir/usr/share/hp-manager/icons"
   mkdir -p "$pkgdir/usr/libexec/hp-manager"
   mkdir -p "$pkgdir/etc/hp-manager"
   mkdir -p "$pkgdir/etc/dbus-1/system.d"
@@ -46,6 +47,7 @@ package() {
   # GUI files
   cp -r src/gui/* "$pkgdir/usr/share/hp-manager/gui/"
   cp -r images/* "$pkgdir/usr/share/hp-manager/images/"
+  cp -r data/icons/* "$pkgdir/usr/share/hp-manager/icons/"
 
   # System files
   for svc in fan rgb power mux platform; do

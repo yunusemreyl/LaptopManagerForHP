@@ -7,6 +7,7 @@ import os, json
 import gi
 gi.require_version('Gtk', '4.0')
 from gi.repository import Gtk, GLib, Gdk
+from icon_utils import make_icon
 
 import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -320,16 +321,16 @@ class AppProfilesPage(Gtk.Box):
                     row.set_margin_top(4)
                     row.set_margin_bottom(4)
                     
-                    icon = "🎮"
+                    icon_key = "game"
                     if category == "program":
-                        icon = "💻"
+                        icon_key = "application"
                     elif category == "other":
-                        icon = "⚙️"
+                        icon_key = "settings"
                         
                     active_app = data.get("active_app")
                     is_active = active_app and (active_app.lower() == app_name.lower())
                     
-                    lbl_text = f"{icon}  {display_name}"
+                    lbl_text = display_name
                     if is_active:
                         lbl_text += f" <span foreground='#57c494' size='small' weight='bold'>[{T('active')}]</span>"
                         
@@ -346,19 +347,21 @@ class AppProfilesPage(Gtk.Box):
                         fan_lbl_text = T("fan_auto") if fan_mode == "auto" else T("fan_max")
                         meta_parts.append(fan_lbl_text)
                     if theme == "dark":
-                        meta_parts.append("\U0001f319")  # 🌙
+                        meta_parts.append(T("dark"))
                     elif theme == "light":
-                        meta_parts.append("\u2600\ufe0f")   # ☀️
+                        meta_parts.append(T("light"))
                     lbl_settings = " • ".join(meta_parts)
                         
                     profile_lbl = Gtk.Label(label=lbl_settings, xalign=0, halign=Gtk.Align.END, css_classes=["dim-label"])
                     
-                    del_btn = Gtk.Button(label="🗑️")
+                    del_btn = Gtk.Button()
+                    del_btn.set_child(make_icon("delete", 17))
                     del_btn.add_css_class("update-btn")
                     del_btn.set_valign(Gtk.Align.CENTER)
                     del_btn.set_tooltip_text(T("delete"))
                     del_btn.connect("clicked", lambda *_, a=app_name: self._delete_app_profile(a))
                     
+                    row.append(make_icon(icon_key, 20))
                     row.append(lbl)
                     row.append(profile_lbl)
                     row.append(del_btn)

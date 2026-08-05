@@ -1,6 +1,7 @@
 import gi
 gi.require_version('Gtk', '4.0')
 from gi.repository import Gtk, GLib
+from icon_utils import icon_name, make_icon
 import urllib.parse
 import subprocess
 import json
@@ -37,7 +38,7 @@ class MappingWizard(Gtk.Box):
     def _build_ui(self):
         # Header
         header = Gtk.Box(spacing=8, valign=Gtk.Align.CENTER)
-        icon = Gtk.Label(label="⌨️")
+        icon = make_icon("keyboard", 19)
         self.title_lbl = Gtk.Label(label=T("per_key_wizard"), xalign=0)
         self.title_lbl.add_css_class("section-title")
         header.append(icon)
@@ -58,9 +59,14 @@ class MappingWizard(Gtk.Box):
         self.start_btn.connect("clicked", self._on_start_clicked)
         self.info_box.append(self.start_btn)
         
+        status_row = Gtk.Box(spacing=7, valign=Gtk.Align.CENTER)
+        self.status_icon = make_icon("success", 16)
+        self.status_icon.set_visible(False)
+        status_row.append(self.status_icon)
         self.status_lbl = Gtk.Label(label="", xalign=0)
         self.status_lbl.add_css_class("settings-row-sublabel")
-        self.info_box.append(self.status_lbl)
+        status_row.append(self.status_lbl)
+        self.info_box.append(status_row)
         
         self.append(self.info_box)
         
@@ -103,6 +109,8 @@ class MappingWizard(Gtk.Box):
         pass
 
     def _on_start_clicked(self, btn):
+        self.status_icon.set_visible(False)
+        self.status_lbl.set_label("")
         self.info_box.set_visible(False)
         self.wizard_box.set_visible(True)
         self.current_key_idx = 0
@@ -147,6 +155,7 @@ class MappingWizard(Gtk.Box):
         self.wizard_box.set_visible(False)
         self.info_box.set_visible(True)
         self.status_lbl.set_label("Saving mapping...")
+        self.status_icon.set_visible(False)
         self._restore_rgb_state()
         
         try:
@@ -155,8 +164,12 @@ class MappingWizard(Gtk.Box):
             svc = bus.get("com.yyl.hpmanager.rgb")
             map_json = json.dumps(self.mapping)
             svc.SavePerKeyMap(map_json)
-            self.status_lbl.set_label("✅ " + T("wizard_complete"))
+            self.status_icon.set_from_icon_name(icon_name("success"))
+            self.status_icon.set_visible(True)
+            self.status_lbl.set_label(T("wizard_complete"))
         except Exception as e:
+            self.status_icon.set_from_icon_name(icon_name("warning"))
+            self.status_icon.set_visible(True)
             self.status_lbl.set_label(f"Error saving map: {e}")
 
     def _restore_rgb_state(self):

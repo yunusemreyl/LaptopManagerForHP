@@ -8,6 +8,7 @@ from gi.repository import Gtk, GLib
 import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
+from icon_utils import make_icon
 
 def T(k):
     from i18n import T as _T
@@ -121,7 +122,7 @@ class PowerPage(Gtk.Box):
         self._uv_card = uv_card
         
         uv_header = Gtk.Box(spacing=10)
-        uv_header.append(Gtk.Image.new_from_icon_name("system-run-symbolic"))
+        uv_header.append(make_icon("cpu", 20))
         uv_title = "Curve Optimizer (AMD)" if is_amd else T("undervolt_label")
         uv_header.append(Gtk.Label(label=uv_title, xalign=0, css_classes=["heading"]))
         uv_card.append(uv_header)
@@ -157,7 +158,7 @@ class PowerPage(Gtk.Box):
         self._tcc_card = tcc_card
         
         tcc_header = Gtk.Box(spacing=10)
-        tcc_header.append(Gtk.Image.new_from_icon_name("weather-clear-symbolic"))
+        tcc_header.append(make_icon("temperature", 20))
         tcc_title = "Thermal Limit Offset (AMD)" if is_amd else T("tcc_label")
         tcc_header.append(Gtk.Label(label=tcc_title, xalign=0, css_classes=["heading"]))
         tcc_card.append(tcc_header)
@@ -181,7 +182,7 @@ class PowerPage(Gtk.Box):
         self._pl_card = pl_card
         
         pl_header = Gtk.Box(spacing=10)
-        pl_header.append(Gtk.Image.new_from_icon_name("battery-good-symbolic"))
+        pl_header.append(make_icon("power", 20))
         pl_header.append(Gtk.Label(label=T("power_limits_label"), xalign=0, css_classes=["heading"]))
         pl_card.append(pl_header)
 

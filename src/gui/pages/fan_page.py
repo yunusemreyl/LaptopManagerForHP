@@ -15,6 +15,7 @@ from widgets.smooth_scroll import SmoothScrolledWindow
 from widgets.fan_curve import FanCurveWidget
 from components.custom_widgets import OmenHighTechGauge, OmenSpecsBridge
 from utils.system_monitor import SystemMonitor
+from icon_utils import make_icon
 import cairo
 
 DEFAULT_MODE_SYNC_DELAY_MS = 1500
@@ -628,7 +629,7 @@ class FanPage(Gtk.Box):
         curve_panel.add_css_class("omen-dashboard-card")
 
         curve_header = Gtk.Box(spacing=10)
-        curve_header.append(Gtk.Image.new_from_icon_name("document-edit-symbolic"))
+        curve_header.append(make_icon("edit", 20))
         curve_header.append(Gtk.Label(label=T("fan_curve"), css_classes=["section-title"]))
         curve_panel.append(curve_header)
 
@@ -690,7 +691,7 @@ class FanPage(Gtk.Box):
         # 1. Windows Key Lock (Oyun Tuş Kilidi) Toggle Row
         win_lock_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
         win_lock_row.set_valign(Gtk.Align.CENTER)
-        win_lock_row.append(Gtk.Image.new_from_icon_name("changes-prevent-symbolic"))
+        win_lock_row.append(make_icon("lock", 20))
         win_lock_row.append(Gtk.Label(label=T("win_lock"), xalign=0, css_classes=["dim-label"]))
         win_lock_row.append(Gtk.Label(hexpand=True))
         
@@ -705,7 +706,7 @@ class FanPage(Gtk.Box):
         # 2. cTGP Toggle Row
         ctgp_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
         ctgp_row.set_valign(Gtk.Align.CENTER)
-        ctgp_row.append(Gtk.Image.new_from_icon_name("video-display-symbolic"))
+        ctgp_row.append(make_icon("gpu", 20))
         ctgp_row.append(Gtk.Label(label="cTGP Boost Mode", xalign=0, css_classes=["dim-label"]))
         ctgp_row.append(Gtk.Label(hexpand=True))
         self.ctgp_status_label = Gtk.Label(label=T("inactive"))
@@ -719,7 +720,7 @@ class FanPage(Gtk.Box):
         # 3. PPAB Toggle Row
         ppab_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
         ppab_row.set_valign(Gtk.Align.CENTER)
-        ppab_row.append(Gtk.Image.new_from_icon_name("processor-symbolic"))
+        ppab_row.append(make_icon("cpu", 20))
         ppab_row.append(Gtk.Label(label="PPAB Dynamic Boost", xalign=0, css_classes=["dim-label"]))
         ppab_row.append(Gtk.Label(hexpand=True))
         self.ppab_status_label = Gtk.Label(label=T("inactive"))
@@ -733,7 +734,7 @@ class FanPage(Gtk.Box):
         # 4. Feral GameMode Status Row (no toggle switch, only badge)
         gm_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
         gm_row.set_valign(Gtk.Align.CENTER)
-        gm_row.append(Gtk.Image.new_from_icon_name("applications-games-symbolic"))
+        gm_row.append(make_icon("game", 20))
         gm_row.append(Gtk.Label(label="Feral GameMode Status", xalign=0, css_classes=["dim-label"]))
         gm_row.append(Gtk.Label(hexpand=True))
         
@@ -754,7 +755,7 @@ class FanPage(Gtk.Box):
 
         sys_header = Gtk.Box(spacing=10)
         sys_header.set_valign(Gtk.Align.CENTER)
-        sys_header.append(Gtk.Image.new_from_icon_name("computer-symbolic"))
+        sys_header.append(make_icon("computer", 20))
         
         # Determine language (TR fallback)
         lang_is_tr = T("fan") == "Performans" or "tr" in os.getenv("LANG", "").lower()
@@ -770,7 +771,7 @@ class FanPage(Gtk.Box):
         model_row = Gtk.Box(spacing=10, margin_top=4, margin_bottom=4)
         model_row.set_valign(Gtk.Align.CENTER)
         
-        model_icon = Gtk.Image.new_from_icon_name("computer-symbolic")
+        model_icon = make_icon("computer", 20)
         model_icon.set_pixel_size(24)
         model_icon.add_css_class("nav-icon")
         model_row.append(model_icon)
@@ -793,10 +794,10 @@ class FanPage(Gtk.Box):
             "ram": "Bellek" if lang_is_tr else "Memory",
         }
         icons = {
-            "cpu": "processor-symbolic",
-            "disk": "drive-harddisk-symbolic",
-            "gpu": "video-display-symbolic",
-            "ram": "media-memory-symbolic",
+            "cpu": "cpu",
+            "disk": "disk",
+            "gpu": "gpu",
+            "ram": "memory",
         }
 
         for key in ("cpu", "gpu", "ram", "disk"):
@@ -804,7 +805,7 @@ class FanPage(Gtk.Box):
             item.add_css_class("home-spec-item")
             item.set_valign(Gtk.Align.CENTER)
 
-            ico = Gtk.Image.new_from_icon_name(icons[key])
+            ico = make_icon(icons[key], 18)
             ico.set_pixel_size(18)
             ico.add_css_class("nav-icon")
             item.append(ico)

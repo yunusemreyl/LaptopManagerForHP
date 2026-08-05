@@ -14,6 +14,7 @@ from icon_utils import make_icon
 from widgets.history_buffer import HistoryBuffer
 from widgets.smooth_scroll import SmoothScrolledWindow
 from widgets.telemetry_history import TelemetryGraph
+from utils.cpu_stats import read_cpu_counters, usage_between
 import cairo
 
 # ── Lazy i18n import ─────────────────────────────────────────────────────────
@@ -45,7 +46,7 @@ class DashboardPage(Gtk.Box):
         self.on_navigate = on_navigate
         self._timer_id = None
         self._start_timer_id = None
-        self._cpu_prev = None       # (total, idle) for delta calc
+        self._cpu_prev = {}         # aggregate/per-core counters for delta calc
         self._cpu_smooth = 0.0      # EMA-smoothed CPU %
         self._data = {}             # latest bg-fetched snapshot
         self._busy = False          # guard against overlapping bg threads
@@ -143,7 +144,84 @@ class DashboardPage(Gtk.Box):
         self._top_row = top_row
         root.append(top_row)
 
+        root.append(self._mk_core_usage())
         root.append(self._mk_telemetry_history())
+
+    def _mk_core_usage(self):
+        card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        card.add_css_class("card")
+        self._core_usage_card = card
+
+        title_row = Gtk.Box(spacing=10)
+        title_row.append(self._heading(T("cpu_core_usage")))
+        title_row.append(Gtk.Label(hexpand=True))
+        self._core_count_label = Gtk.Label(css_classes=["dim-label"])
+        title_row.append(self._core_count_label)
+        card.append(title_row)
+        card.append(Gtk.Separator())
+
+        self._core_flow = Gtk.FlowBox()
+        self._core_flow.set_selection_mode(Gtk.SelectionMode.NONE)
+        self._core_flow.set_homogeneous(True)
+        self._core_flow.set_column_spacing(10)
+        self._core_flow.set_row_spacing(10)
+        self._core_flow.set_min_children_per_line(2)
+        self._core_flow.set_max_children_per_line(4)
+        card.append(self._core_flow)
+
+        self._core_widgets = []
+        self._rebuild_core_widgets(os.cpu_count() or 1)
+        return card
+
+    def _rebuild_core_widgets(self, count):
+        child = self._core_flow.get_first_child()
+        while child is not None:
+            next_child = child.get_next_sibling()
+            self._core_flow.remove(child)
+            child = next_child
+
+        self._core_widgets = []
+        for index in range(max(1, count)):
+            tile = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=7)
+            tile.add_css_class("inner-panel")
+
+            row = Gtk.Box(spacing=8)
+            row.append(Gtk.Label(
+                label=T("core_label").format(index=index),
+                xalign=0, hexpand=True, css_classes=["dim-label"]))
+            value_label = Gtk.Label(label="—", xalign=1, css_classes=["title-4"])
+            row.append(value_label)
+            tile.append(row)
+
+            level = Gtk.LevelBar()
+            level.set_min_value(0.0)
+            level.set_max_value(100.0)
+            level.set_value(0.0)
+            level.add_css_class("core-usage-bar")
+            tile.append(level)
+
+            self._core_flow.append(tile)
+            self._core_widgets.append((level, value_label))
+
+        self._core_count_label.set_label(
+            T("logical_cores").format(count=len(self._core_widgets)))
+
+    def _update_core_usage(self, percentages):
+        if len(percentages) != len(self._core_widgets):
+            self._rebuild_core_widgets(len(percentages))
+        for (level, label), percentage in zip(self._core_widgets, percentages):
+            for css_class in ("core-medium", "core-high"):
+                level.remove_css_class(css_class)
+            if percentage is None:
+                level.set_value(0.0)
+                label.set_label("—")
+                continue
+            level.set_value(percentage)
+            label.set_label(f"{int(round(percentage))}%")
+            if percentage >= 85:
+                level.add_css_class("core-high")
+            elif percentage >= 55:
+                level.add_css_class("core-medium")
 
     def _mk_telemetry_history(self):
         card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
@@ -255,6 +333,11 @@ class DashboardPage(Gtk.Box):
                       getattr(self, "_fan_history_graph", None)):
             if graph is not None:
                 graph.set_content_height(graph_height)
+
+        core_flow = getattr(self, "_core_flow", None)
+        if core_flow is not None:
+            core_flow.set_max_children_per_line(
+                2 if bucket == "compact" else 6 if bucket == "spacious" else 4)
 
         ring_size = 124 if bucket == "compact" else 160 if bucket == "spacious" else 146
         for ring in (getattr(self, "_cpu_temp", None), getattr(self, "_gpu_temp", None)):
@@ -610,30 +693,25 @@ class DashboardPage(Gtk.Box):
         if not d["gpu_temp"]:
             d["gpu_temp"] = self._get_gpu_temp()
 
-        # ── CPU % from /proc/stat ─────────────────────────────────────────
+        # ── Aggregate and per-core CPU % from /proc/stat deltas ───────────
         try:
-            with open("/proc/stat") as f:
-                cpu = f.readline().strip().split()
-            vals = [int(x) for x in cpu[1:9]]
-            user, nice, system, idle, iowait, irq, softirq, steal = vals
-            idle_all = idle + iowait
-            total = sum(vals)
-            pct = self._cpu_smooth
+            counters = read_cpu_counters()
+            pct = usage_between(self._cpu_prev.get("cpu"), counters.get("cpu"))
+            core_names = sorted(
+                (name for name in counters if name != "cpu"),
+                key=lambda name: int(name[3:]))
+            d["core_pcts"] = [
+                usage_between(self._cpu_prev.get(name), counters[name])
+                for name in core_names
+            ]
+            self._cpu_prev = counters
 
-            if self._cpu_prev is not None:
-                prev_total, prev_idle = self._cpu_prev
-                total_delta = total - prev_total
-                idle_delta = idle_all - prev_idle
-                if total_delta > 0:
-                    pct = (1.0 - (idle_delta / total_delta)) * 100.0
-
-            self._cpu_prev = (total, idle_all)
-
-            if self._cpu_smooth <= 0.0:
-                self._cpu_smooth = max(0.0, min(100.0, pct))
-            else:
-                self._cpu_smooth = (self._cpu_smooth * 0.62) + (max(0.0, min(100.0, pct)) * 0.38)
-            d["cpu_pct"] = self._cpu_smooth
+            if pct is not None:
+                if self._cpu_smooth <= 0.0:
+                    self._cpu_smooth = pct
+                else:
+                    self._cpu_smooth = (self._cpu_smooth * 0.62) + (pct * 0.38)
+                d["cpu_pct"] = self._cpu_smooth
         except Exception:
             pass
 
@@ -747,6 +825,9 @@ class DashboardPage(Gtk.Box):
         if cpu_pct is not None:
             self._cpu_spark.push_value(cpu_pct)
             self._cpu_pct_lbl.set_label(f"{int(cpu_pct)}%")
+        core_pcts = d.get("core_pcts")
+        if core_pcts:
+            self._update_core_usage(core_pcts)
         self._disk_chart.set_value(d.get("disk_pct", 0.0))
         self._ram_chart.set_value(d.get("ram_pct", 0.0))
 

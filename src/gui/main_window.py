@@ -1012,6 +1012,22 @@ class HPManagerWindow(Gtk.ApplicationWindow):
             background: #ff8a61;
             border-radius: 999px;
         }}
+        levelbar.core-usage-bar trough {{
+            min-height: 6px;
+            border-radius: 999px;
+            background: alpha({fg}, 0.09);
+        }}
+        levelbar.core-usage-bar block.filled {{
+            min-height: 6px;
+            border-radius: 999px;
+            background: {accent};
+        }}
+        levelbar.core-usage-bar.core-medium block.filled {{
+            background: #f59e0b;
+        }}
+        levelbar.core-usage-bar.core-high block.filled {{
+            background: #ef4444;
+        }}
         .launcher-card-dimmed {{
             opacity: {launcher_dimmed_opacity};
             border-color: alpha({fg}, 0.03);

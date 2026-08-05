@@ -33,6 +33,10 @@ PWM_MAX = 255
 PWM_FALLBACK_MIN = 50
 THERMAL_PROFILE_BALANCED = 0
 THERMAL_PROFILE_MAX = 1
+THERMAL_PROTECTION_TRIGGER_C = 95.0
+THERMAL_PROTECTION_RELEASE_C = 85.0
+THERMAL_PROTECTION_TIMEOUT_S = 300.0
+THERMAL_PROTECTION_TIMEOUT_RELEASE_C = 90.0
 
 # ─── Fan Controller ───────────────────────────────────────────────────────────
 
@@ -527,6 +531,23 @@ class FanService:
                 return f0 + (f1 - f0) * ratio
         return points[-1][1]
 
+    @staticmethod
+    def _should_exit_thermal_protection(temp, elapsed):
+        """Return whether thermal protection can safely release.
+
+        The lower release threshold provides hysteresis so the fan mode does
+        not rapidly toggle around the trigger temperature.  The timeout path
+        is a safety net for sensors that cool slowly but remain below the
+        trigger point.
+        """
+        return (
+            temp <= THERMAL_PROTECTION_RELEASE_C
+            or (
+                elapsed > THERMAL_PROTECTION_TIMEOUT_S
+                and temp <= THERMAL_PROTECTION_TIMEOUT_RELEASE_C
+            )
+        )
+
     def _monitor_loop(self):
         while True:
             if system_sleeping.is_set():
@@ -543,7 +564,7 @@ class FanService:
                     fans_stalled = True
 
             # Thermal Protection Mode
-            if (temp > 95.0 or fans_stalled) and not self._thermal_protection_active:
+            if (temp > THERMAL_PROTECTION_TRIGGER_C or fans_stalled) and not self._thermal_protection_active:
                 if fans_stalled:
                     logger.critical("FAN STALL DETECTED! Temp is %d°C but fans are at 0 RPM! Activating Protection.", temp)
                 else:
@@ -563,10 +584,10 @@ class FanService:
                 # Exit conditions:
                 # 1. Temperature dropped below 85°C (10°C hysteresis from 95°C entry), OR
                 # 2. Protection active >5 minutes AND temp below 90°C (timeout safety net)
-                should_exit = temp <= 85.0 or (elapsed > 300.0 and temp <= 90.0)
+                should_exit = self._should_exit_thermal_protection(temp, elapsed)
 
                 if should_exit:
-                    if elapsed > 300.0:
+                    if elapsed > THERMAL_PROTECTION_TIMEOUT_S:
                         logger.info("Thermal Protection timeout after %.0fs (temp=%d°C). Deactivating.", elapsed, temp)
                     else:
                         logger.info("Temperature dropped to %d°C. Deactivating Thermal Protection Mode.", temp)

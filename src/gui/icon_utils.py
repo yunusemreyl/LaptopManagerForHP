@@ -6,7 +6,7 @@ across desktop environments without replacing the user's global icon theme.
 
 import os
 
-from gi.repository import Gdk, Gio, Gtk
+from gi.repository import Gdk, GLib, Gtk
 
 
 _GUI_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -36,6 +36,7 @@ ICON_ALIASES = {
 }
 
 _registered_displays = set()
+_svg_cache = {}
 
 
 def icon_root():
@@ -48,6 +49,15 @@ def icon_name(key):
     normalized = str(key or "").strip().lower().replace("-", "_")
     normalized = ICON_ALIASES.get(normalized, normalized).replace("_", "-")
     return f"omenctl-{normalized}-symbolic"
+
+
+def icon_file(key):
+    """Return the bundled SVG path for a semantic key, when available."""
+    root = icon_root()
+    if root is None:
+        return None
+    path = os.path.join(root, "hicolor", "scalable", "actions", f"{icon_name(key)}.svg")
+    return path if os.path.isfile(path) else None
 
 
 def ensure_icon_theme():
@@ -68,13 +78,36 @@ def ensure_icon_theme():
     return True
 
 
+def _svg_paintable(path):
+    """Load a GTK-native, recolorable SVG paintable."""
+    if path in _svg_cache:
+        return _svg_cache[path]
+    if not hasattr(Gtk, "Svg"):
+        return None
+    with open(path, "rb") as source:
+        paintable = Gtk.Svg.new_from_bytes(GLib.Bytes.new(source.read()))
+    _svg_cache[path] = paintable
+    return paintable
+
+
+def set_icon(image, key, fallback="image-missing-symbolic"):
+    """Set an existing ``Gtk.Image`` to a bundled, recolorable SVG."""
+    path = icon_file(key)
+    if path:
+        paintable = _svg_paintable(path)
+        if paintable is not None:
+            image.set_from_paintable(paintable)
+        else:
+            image.set_from_file(path)
+    else:
+        image.set_from_icon_name(fallback)
+    return image
+
+
 def make_icon(key, size=20, css_class=None, fallback="image-missing-symbolic"):
-    """Create a consistently sized symbolic ``Gtk.Image``."""
-    ensure_icon_theme()
-    names = [icon_name(key)]
-    if fallback:
-        names.append(fallback)
-    image = Gtk.Image.new_from_gicon(Gio.ThemedIcon.new_from_names(names))
+    """Create a consistently sized, theme-aware SVG ``Gtk.Image``."""
+    image = Gtk.Image()
+    set_icon(image, key, fallback)
     image.set_pixel_size(int(size))
     image.set_size_request(int(size), int(size))
     image.set_valign(Gtk.Align.CENTER)

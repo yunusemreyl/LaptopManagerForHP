@@ -10,6 +10,8 @@ ICON_UTILS = os.path.join(REPO_ROOT, "src", "gui", "icon_utils.py")
 ICON_DIR = os.path.join(
     REPO_ROOT, "data", "icons", "hicolor", "scalable", "actions"
 )
+GPA_NS = "https://www.gtk.org/path-animation/1"
+SVG_PRIMITIVES = {"path", "circle", "rect", "line", "polyline", "polygon"}
 
 
 def _literal_assignment(tree, name):
@@ -40,6 +42,18 @@ class BundledIconTest(unittest.TestCase):
                 root = ET.parse(path).getroot()
                 self.assertTrue(root.tag.endswith("svg"))
                 self.assertEqual(root.attrib.get("viewBox"), "0 0 24 24")
+                self.assertEqual(root.attrib.get(f"{{{GPA_NS}}}version"), "1")
+                primitives = [
+                    element for element in root.iter()
+                    if element.tag.rsplit("}", 1)[-1] in SVG_PRIMITIVES
+                ]
+                self.assertTrue(primitives)
+                for element in primitives:
+                    self.assertTrue(
+                        element.attrib.get(f"{{{GPA_NS}}}stroke")
+                        or element.attrib.get(f"{{{GPA_NS}}}fill"),
+                        f"Missing symbolic paint on {element.tag} in {path}",
+                    )
 
     def test_aliases_resolve_to_bundled_icons(self):
         for alias, target in self.aliases.items():
@@ -48,7 +62,7 @@ class BundledIconTest(unittest.TestCase):
 
     def test_literal_icon_calls_resolve_to_bundled_icons(self):
         call_pattern = re.compile(
-            r"(?<![A-Za-z0-9_])(?:make_icon|icon_name)\(\s*[\"']([a-z_]+)[\"']"
+            r"(?<![A-Za-z0-9_])(?:make_icon|icon_name|set_icon)\(\s*[\"']([a-z_]+)[\"']"
         )
         for root, _, files in os.walk(os.path.join(REPO_ROOT, "src", "gui")):
             for filename in files:

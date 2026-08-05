@@ -48,7 +48,7 @@ else:
 sys.path.insert(0, BASE_DIR)
 sys.path.insert(0, os.path.dirname(BASE_DIR))
 
-from icon_utils import ensure_icon_theme, icon_name, make_icon
+from icon_utils import ensure_icon_theme, make_icon, set_icon
 from pages.fan_page import FanPage
 from pages.lighting_page import LightingPage
 from pages.mux_page import MUXPage
@@ -2882,7 +2882,7 @@ class HPManagerWindow(Gtk.ApplicationWindow):
         if not hasattr(self, "theme_toggle_icon") or self.theme_toggle_icon is None:
             return
         is_dark = self._is_dark_mode()
-        self.theme_toggle_icon.set_from_icon_name(icon_name("appearance" if is_dark else "theme"))
+        set_icon(self.theme_toggle_icon, "appearance" if is_dark else "theme")
         lbl_text = T("light") if is_dark else T("dark")
         if hasattr(self, "theme_toggle_lbl") and self.theme_toggle_lbl is not None:
             self.theme_toggle_lbl.set_label(lbl_text)

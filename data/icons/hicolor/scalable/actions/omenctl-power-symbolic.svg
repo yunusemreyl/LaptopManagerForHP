@@ -1,1 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#2e3436" stroke-width="2" stroke-linecap="round"><path d="M12 2v9"/><path d="M6.4 5.6a8 8 0 1 0 11.2 0"/></svg>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:gpa="https://www.gtk.org/path-animation/1" gpa:version="1" viewBox="0 0 24 24" fill="none" stroke="#2e3436" stroke-width="2" stroke-linecap="round"><path gpa:stroke="foreground" stroke-width="2" stroke-linecap="round" d="M12 2v9"/><path gpa:stroke="foreground" stroke-width="2" stroke-linecap="round" d="M6.4 5.6a8 8 0 1 0 11.2 0"/></svg>

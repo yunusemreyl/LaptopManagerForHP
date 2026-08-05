@@ -1,7 +1,7 @@
 import gi
 gi.require_version('Gtk', '4.0')
 from gi.repository import Gtk, GLib
-from icon_utils import icon_name, make_icon
+from icon_utils import make_icon, set_icon
 import urllib.parse
 import subprocess
 import json
@@ -164,11 +164,11 @@ class MappingWizard(Gtk.Box):
             svc = bus.get("com.yyl.hpmanager.rgb")
             map_json = json.dumps(self.mapping)
             svc.SavePerKeyMap(map_json)
-            self.status_icon.set_from_icon_name(icon_name("success"))
+            set_icon(self.status_icon, "success")
             self.status_icon.set_visible(True)
             self.status_lbl.set_label(T("wizard_complete"))
         except Exception as e:
-            self.status_icon.set_from_icon_name(icon_name("warning"))
+            set_icon(self.status_icon, "warning")
             self.status_icon.set_visible(True)
             self.status_lbl.set_label(f"Error saving map: {e}")
 

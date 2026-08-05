@@ -5,7 +5,7 @@ from utils.updater import OmenUpdater
 from utils.diagnostics import generate_diagnostic_report, generate_github_issue_body
 import gi
 gi.require_version('Gtk', '4.0')
-from gi.repository import Gtk, GLib, Gdk
+from gi.repository import Gtk, GLib, Gdk, Pango
 from icon_utils import make_icon, make_icon_label
 from widgets.smooth_scroll import SmoothScrolledWindow
 from widgets.mapping_wizard import MappingWizard
@@ -484,7 +484,7 @@ class SettingsPage(Gtk.Box):
         self.power_source_switch.set_sensitive(False)
         self.power_source_switch.connect("state-set", self._on_power_source_toggle)
         power_source_card.append(self._make_settings_row(
-            "autostart", T("power_source_auto"), self.power_source_switch,
+            "update", T("power_source_auto"), self.power_source_switch,
             sublabel=T("power_source_auto_desc"), bg_class="icon-bg-sys"))
 
         power_source_card.append(self._make_sep())
@@ -536,8 +536,19 @@ class SettingsPage(Gtk.Box):
         update_row.add_css_class("settings-row")
         self._update_row = update_row
 
-        # Version info left side (Vertically centered)
-        ver_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1, hexpand=True, valign=Gtk.Align.CENTER)
+        update_icon = make_icon("update", 21)
+        update_icon.add_css_class("settings-row-icon")
+        update_icon.add_css_class("icon-bg-sys")
+        update_row.append(update_icon)
+
+        # Keep the version and update result on one line so checking for an
+        # update does not make the card grow or shift vertically.
+        ver_box = Gtk.Box(
+            orientation=Gtk.Orientation.HORIZONTAL,
+            spacing=8,
+            hexpand=True,
+            valign=Gtk.Align.CENTER,
+        )
         ver_lbl = Gtk.Label(
             label=f"OmenCtl v{APP_VERSION}", xalign=0, halign=Gtk.Align.START)
         ver_lbl.add_css_class("update-ver-label")
@@ -545,6 +556,7 @@ class SettingsPage(Gtk.Box):
 
         self.update_status = Gtk.Label(label="", xalign=0, halign=Gtk.Align.START)
         self.update_status.add_css_class("settings-row-sublabel")
+        self.update_status.set_ellipsize(Pango.EllipsizeMode.END)
         ver_box.append(self.update_status)
         update_row.append(ver_box)
 
@@ -554,7 +566,8 @@ class SettingsPage(Gtk.Box):
         update_row.append(self.update_spinner)
 
         # Buttons
-        self.update_btn = Gtk.Button(label=T("check_update"))
+        self.update_btn = Gtk.Button()
+        self.update_btn.set_child(make_icon_label("update", T("check_update"), size=16))
         self.update_btn.add_css_class("update-btn")
         self.update_btn.connect("clicked", self._check_update)
         update_row.append(self.update_btn)
@@ -599,7 +612,7 @@ class SettingsPage(Gtk.Box):
 
         content.append(self._make_section_header("system_info", T("sys_info")))
 
-        # System info rows with emojis
+        # System info rows with dedicated symbolic icons
         sys_info = [
             ("computer",     T("computer"),  platform.node(),       "icon-bg-theme"),
             ("kernel",       T("kernel"),    platform.release(),    "icon-bg-mux"),
@@ -624,7 +637,7 @@ class SettingsPage(Gtk.Box):
 
         info_card.append(self._make_driver_row("lighting", "hp-rgb-lighting", hp_rgb_loaded))
         info_card.append(self._make_sep())
-        info_card.append(self._make_driver_row("fan", "hp-wmi (Fan/Thermal/Key)", hp_wmi_loaded))
+        info_card.append(self._make_driver_row("driver", "hp-wmi (Fan/Thermal/Key)", hp_wmi_loaded))
 
         content.append(info_card)
 
@@ -711,48 +724,47 @@ class SettingsPage(Gtk.Box):
         
         self._about_icon = None
 
-        # Text column (Vertically centered & left-aligned)
-        about_text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=3, valign=Gtk.Align.CENTER, halign=Gtk.Align.START)
-        
-        name_row = Gtk.Box(spacing=8, valign=Gtk.Align.CENTER, halign=Gtk.Align.START)
-        name_row.append(app_logo)
-        
+        # Keep the complete about summary in a single compact row.
+        profile_row = Gtk.Box(
+            spacing=8, hexpand=True,
+            valign=Gtk.Align.CENTER, halign=Gtk.Align.FILL)
+        profile_row.add_css_class("about-brand-box")
+        profile_row.set_margin_start(4)
+        profile_row.set_margin_top(8)
+        profile_row.set_margin_bottom(8)
+        profile_row.append(app_logo)
+
         name_lbl = Gtk.Label(label="OmenCtl", xalign=0, halign=Gtk.Align.START)
         name_lbl.add_css_class("about-app-name")
-        name_row.append(name_lbl)
+        profile_row.append(name_lbl)
 
         ver_badge = Gtk.Label(label=f"v{APP_VERSION}", halign=Gtk.Align.START)
         ver_badge.add_css_class("about-ver-badge")
-        name_row.append(ver_badge)
-        about_text.append(name_row)
+        profile_row.append(ver_badge)
+
+        profile_row.append(Gtk.Label(label="•", css_classes=["about-disclaimer"]))
 
         dev_lbl = Gtk.Label(
             label=f"{T('developer')}: <a href='https://github.com/yunusemreyl'>yunusemreyl</a>",
             use_markup=True, xalign=0, halign=Gtk.Align.START)
         dev_lbl.add_css_class("about-dev-link")
-        about_text.append(dev_lbl)
+        profile_row.append(dev_lbl)
 
-        # Horizontal Box grouping Texts (Left-aligned, flush left)
-        profile_row = Gtk.Box(spacing=16, valign=Gtk.Align.CENTER, halign=Gtk.Align.START)
-        profile_row.add_css_class("about-brand-box")
-        profile_row.set_margin_start(4)
-        profile_row.set_margin_top(8)
-        profile_row.set_margin_bottom(8)
-        profile_row.append(about_text)
-        about_card.append(profile_row)
-
-        about_card.append(self._make_sep())
-
-        # Disclaimer (Left-aligned, flush left)
-        disclaimer_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8, halign=Gtk.Align.START)
-        disclaimer_box.add_css_class("about-disclaimer-box")
-        disclaimer_box.set_margin_start(4)
-        disclaimer_box.append(make_icon("legal", 18))
+        meta_sep = Gtk.Label(label="•")
+        meta_sep.add_css_class("about-disclaimer")
+        disclaimer_group = Gtk.Box(
+            spacing=8, hexpand=True,
+            valign=Gtk.Align.CENTER, halign=Gtk.Align.END)
+        disclaimer_group.append(meta_sep)
+        disclaimer_group.append(make_icon("legal", 14))
         disclaimer_lbl = Gtk.Label(
-            label=T('disclaimer'), use_markup=True, xalign=0.0, wrap=True, halign=Gtk.Align.START)
+            label=T('disclaimer'), use_markup=True, xalign=1.0,
+            wrap=False, halign=Gtk.Align.END)
+        disclaimer_lbl.set_ellipsize(Pango.EllipsizeMode.END)
         disclaimer_lbl.add_css_class("about-disclaimer")
-        disclaimer_box.append(disclaimer_lbl)
-        about_card.append(disclaimer_box)
+        disclaimer_group.append(disclaimer_lbl)
+        profile_row.append(disclaimer_group)
+        about_card.append(profile_row)
 
         content.append(about_card)
 
@@ -1050,6 +1062,12 @@ class SettingsPage(Gtk.Box):
             self.battery_profile_dd.set_sensitive(False)
             self.power_source_status.set_label(T("power_source_unavailable"))
             return
+        if not callable(getattr(service, "SetPowerSourceProfiles", None)):
+            self.power_source_switch.set_sensitive(False)
+            self.ac_profile_dd.set_sensitive(False)
+            self.battery_profile_dd.set_sensitive(False)
+            self.power_source_status.set_label(T("power_service_update_required"))
+            return
         self.power_source_status.set_label(T("power_source_connecting"))
         threading.Thread(target=self._load_power_source_settings, daemon=True).start()
 
@@ -1124,7 +1142,11 @@ class SettingsPage(Gtk.Box):
 
     @property
     def power_source_service_available(self):
-        return self.power_service is not None and hasattr(self, "_available_power_profile_ids")
+        return (
+            self.power_service is not None
+            and callable(getattr(self.power_service, "SetPowerSourceProfiles", None))
+            and hasattr(self, "_available_power_profile_ids")
+        )
 
     def _save_power_source_profiles(self, enabled=None):
         if not self.power_source_service_available:

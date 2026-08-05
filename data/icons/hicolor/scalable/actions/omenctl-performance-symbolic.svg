@@ -1,1 +1,31 @@
-<svg xmlns="http://www.w3.org/2000/svg" xmlns:gpa="https://www.gtk.org/path-animation/1" gpa:version="1" viewBox="0 0 24 24" fill="none" stroke="#2e3436" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path gpa:stroke="foreground" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M4.2 18a9 9 0 1 1 15.6 0M6.6 15.5l-1.8.8M8.5 12.2 7.2 10.7M12 11V8.5M15.1 12.6l1.5-1.7M12 16l4.3-3.2"/><circle gpa:fill="foreground" cx="12" cy="16" r="1.4" fill="#2e3436"/></svg>
+<svg xmlns="http://www.w3.org/2000/svg"
+     xmlns:gpa="https://www.gtk.org/path-animation/1"
+     gpa:version="1"
+     viewBox="0 0 24 24"
+     fill="none"
+     stroke="#2e3436"
+     stroke-width="1.8"
+     stroke-linecap="round"
+     stroke-linejoin="round">
+  <!-- Clean outer gauge silhouette -->
+  <path gpa:stroke="foreground"
+        d="M4.25 18.5a9 9 0 1 1 15.5 0"/>
+
+  <!-- Balanced gauge markings -->
+  <path gpa:stroke="foreground"
+        d="M6.25 15.5 4.7 16.15M8.2 11.35 7 10.15M12 9.5V7.75M15.8 11.35 17 10.15M17.75 15.5l1.55.65"/>
+
+  <!-- Performance needle and hub -->
+  <path gpa:stroke="foreground"
+        stroke-width="2.1"
+        d="m12 16.5 4.75-5.35"/>
+  <circle gpa:fill="foreground"
+          cx="12"
+          cy="16.5"
+          r="1.55"
+          fill="#2e3436"
+          stroke="none"/>
+
+  <!-- Stable baseline keeps the small icon visually grounded -->
+  <path gpa:stroke="foreground" d="M6.1 19.25h11.8"/>
+</svg>

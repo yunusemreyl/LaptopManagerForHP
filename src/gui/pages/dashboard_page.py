@@ -134,7 +134,7 @@ class DashboardPage(Gtk.Box):
         self._root_box = root
 
         heading_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-        heading_box.append(self._heading(T("sys_info")))
+        heading_box.append(self._heading(T("sys_info"), "computer"))
         heading_box.append(Gtk.Separator())
         root.append(heading_box)
 
@@ -144,63 +144,69 @@ class DashboardPage(Gtk.Box):
         self._top_row = top_row
         root.append(top_row)
 
-        root.append(self._mk_core_usage())
         root.append(self._mk_telemetry_history())
 
     def _mk_core_usage(self):
-        card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
-        card.add_css_class("card")
-        self._core_usage_card = card
+        section = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        self._core_usage_section = section
 
         title_row = Gtk.Box(spacing=10)
-        title_row.append(self._heading(T("cpu_core_usage")))
+        title_row.append(make_icon("cpu", 17))
+        title = Gtk.Label(label=T("cpu_core_usage"), xalign=0)
+        title.add_css_class("dim-label")
+        title_row.append(title)
         title_row.append(Gtk.Label(hexpand=True))
         self._core_count_label = Gtk.Label(css_classes=["dim-label"])
         title_row.append(self._core_count_label)
-        card.append(title_row)
-        card.append(Gtk.Separator())
+        section.append(title_row)
 
-        self._core_flow = Gtk.FlowBox()
-        self._core_flow.set_selection_mode(Gtk.SelectionMode.NONE)
-        self._core_flow.set_homogeneous(True)
-        self._core_flow.set_column_spacing(10)
-        self._core_flow.set_row_spacing(10)
-        self._core_flow.set_min_children_per_line(2)
-        self._core_flow.set_max_children_per_line(4)
-        card.append(self._core_flow)
+        self._core_list = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        self._core_list.set_margin_end(6)
+
+        self._core_scroll = Gtk.ScrolledWindow()
+        self._core_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        self._core_scroll.set_min_content_height(140)
+        self._core_scroll.set_max_content_height(190)
+        self._core_scroll.set_propagate_natural_height(True)
+        self._core_scroll.set_child(self._core_list)
+        section.append(self._core_scroll)
 
         self._core_widgets = []
         self._rebuild_core_widgets(os.cpu_count() or 1)
-        return card
+        return section
 
     def _rebuild_core_widgets(self, count):
-        child = self._core_flow.get_first_child()
+        child = self._core_list.get_first_child()
         while child is not None:
             next_child = child.get_next_sibling()
-            self._core_flow.remove(child)
+            self._core_list.remove(child)
             child = next_child
 
         self._core_widgets = []
         for index in range(max(1, count)):
-            tile = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=7)
-            tile.add_css_class("inner-panel")
+            row = Gtk.Box(spacing=10)
+            row.add_css_class("status-strip")
 
-            row = Gtk.Box(spacing=8)
-            row.append(Gtk.Label(
+            core_label = Gtk.Label(
                 label=T("core_label").format(index=index),
-                xalign=0, hexpand=True, css_classes=["dim-label"]))
-            value_label = Gtk.Label(label="—", xalign=1, css_classes=["title-4"])
-            row.append(value_label)
-            tile.append(row)
+                xalign=0, css_classes=["dim-label"])
+            core_label.set_size_request(88, -1)
+            row.append(core_label)
 
             level = Gtk.LevelBar()
             level.set_min_value(0.0)
             level.set_max_value(100.0)
             level.set_value(0.0)
+            level.set_hexpand(True)
+            level.set_valign(Gtk.Align.CENTER)
             level.add_css_class("core-usage-bar")
-            tile.append(level)
+            row.append(level)
 
-            self._core_flow.append(tile)
+            value_label = Gtk.Label(label="—", xalign=1, css_classes=["title-4"])
+            value_label.set_size_request(48, -1)
+            row.append(value_label)
+
+            self._core_list.append(row)
             self._core_widgets.append((level, value_label))
 
         self._core_count_label.set_label(
@@ -229,7 +235,7 @@ class DashboardPage(Gtk.Box):
         self._telemetry_card = card
 
         title_row = Gtk.Box(spacing=10)
-        title_row.append(self._heading(T("live_telemetry")))
+        title_row.append(self._heading(T("live_telemetry"), "diagnostics"))
         title_row.append(Gtk.Label(hexpand=True))
         badge = Gtk.Label(label=T("last_10_minutes"))
         badge.add_css_class("osd")
@@ -238,7 +244,7 @@ class DashboardPage(Gtk.Box):
         card.append(Gtk.Separator())
 
         self._temp_history_label = self._telemetry_series_header(
-            card, T("temperature_history"))
+            card, T("temperature_history"), "temperature")
         temp_frame = Gtk.Box()
         temp_frame.add_css_class("inner-panel")
         self._temp_history_graph = TelemetryGraph(
@@ -256,7 +262,7 @@ class DashboardPage(Gtk.Box):
         card.append(temp_frame)
 
         self._fan_history_label = self._telemetry_series_header(
-            card, T("fan_speed_history"))
+            card, T("fan_speed_history"), "fan")
         fan_frame = Gtk.Box()
         fan_frame.add_css_class("inner-panel")
         self._fan_history_graph = TelemetryGraph(
@@ -276,8 +282,9 @@ class DashboardPage(Gtk.Box):
         return card
 
     @staticmethod
-    def _telemetry_series_header(parent, title):
+    def _telemetry_series_header(parent, title, icon_key):
         row = Gtk.Box(spacing=10)
+        row.append(make_icon(icon_key, 16))
         heading = Gtk.Label(label=title, xalign=0, css_classes=["heading"])
         row.append(heading)
         row.append(Gtk.Label(hexpand=True))
@@ -334,10 +341,10 @@ class DashboardPage(Gtk.Box):
             if graph is not None:
                 graph.set_content_height(graph_height)
 
-        core_flow = getattr(self, "_core_flow", None)
-        if core_flow is not None:
-            core_flow.set_max_children_per_line(
-                2 if bucket == "compact" else 6 if bucket == "spacious" else 4)
+        core_scroll = getattr(self, "_core_scroll", None)
+        if core_scroll is not None:
+            core_scroll.set_max_content_height(
+                150 if bucket == "compact" else 220 if bucket == "spacious" else 190)
 
         ring_size = 124 if bucket == "compact" else 160 if bucket == "spacious" else 146
         for ring in (getattr(self, "_cpu_temp", None), getattr(self, "_gpu_temp", None)):
@@ -361,7 +368,7 @@ class DashboardPage(Gtk.Box):
         else:
             card.add_css_class("card")
 
-        card.append(self._heading(T("quick_status")))
+        card.append(self._heading(T("quick_status"), "dashboard"))
         card.append(Gtk.Separator())
 
         # Temperature boxes side-by-side
@@ -420,7 +427,7 @@ class DashboardPage(Gtk.Box):
         else:
             card.add_css_class("card")
 
-        card.append(self._heading(T("hardware_profile")))
+        card.append(self._heading(T("hardware_profile"), "computer"))
         card.append(Gtk.Separator())
 
         strips = Gtk.Box(spacing=10, homogeneous=True)
@@ -482,7 +489,7 @@ class DashboardPage(Gtk.Box):
         else:
             card.add_css_class("card")
 
-        card.append(self._heading(T("resources")))
+        card.append(self._heading(T("resources"), "cpu"))
         card.append(Gtk.Separator())
 
         column = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=14, hexpand=True)
@@ -502,6 +509,8 @@ class DashboardPage(Gtk.Box):
         self._ram_chart = ResourceBox("#2ec27e", T("ram"))
         column.append(self._disk_chart)
         column.append(self._ram_chart)
+        column.append(Gtk.Separator())
+        column.append(self._mk_core_usage())
         card.append(column)
         return card
 
@@ -514,7 +523,7 @@ class DashboardPage(Gtk.Box):
         else:
             card.add_css_class("card")
 
-        card.append(self._heading(T("quick_actions")))
+        card.append(self._heading(T("quick_actions"), "performance"))
         card.append(Gtk.Separator())
 
         vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
@@ -577,7 +586,14 @@ class DashboardPage(Gtk.Box):
 
     # ── tiny helpers ──────────────────────────────────────────────────────
     @staticmethod
-    def _heading(text):
+    def _heading(text, icon_key=None):
+        if icon_key:
+            row = Gtk.Box(spacing=8, valign=Gtk.Align.CENTER)
+            row.append(make_icon(icon_key, 17))
+            lbl = Gtk.Label(label=text, xalign=0)
+            lbl.add_css_class("heading")
+            row.append(lbl)
+            return row
         lbl = Gtk.Label(label=text, xalign=0)
         lbl.add_css_class("heading")
         return lbl

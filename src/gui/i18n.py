@@ -35,6 +35,7 @@ TRANSLATIONS = {
         "saver": "Tasarruf", "balanced": "Dengeli", "performance": "Performans",
         "auto": "Otomatik", "max": "Maksimum", "custom": "Özel", "standard": "Standart",
         "curve_desc": "Noktaları sürükleyerek fan eğrisini özelleştirin. X: Sıcaklık (°C), Y: Fan Hızı (%)",
+        "apply": "Uygula", "revert_default": "Varsayılana Dön",
         "no_sensor": "Sensör verisi bulunamadı",
         # Lighting page
         "keyboard_lighting": "Klavye Aydınlatma", "keyboard_light": "KLAVYE IŞIĞI",
@@ -87,6 +88,7 @@ TRANSLATIONS = {
         "power_source_connecting": "Güç hizmetine bağlanılıyor...",
         "power_source_saving": "Profil tercihleri kaydediliyor...",
         "power_source_unavailable": "Güç hizmeti kullanılamıyor.",
+        "power_service_update_required": "Power daemon eski sürümde. Bu özelliği kullanmak için OmenCtl'yi yeniden kurun.",
         "power_source_ac": "Prize takılı",
         "power_source_battery": "Batarya",
         "power_source_unknown": "Bilinmiyor",
@@ -213,6 +215,7 @@ TRANSLATIONS = {
         "saver": "Power Saver", "balanced": "Balanced", "performance": "Performance",
         "auto": "Automatic", "max": "Maximum", "custom": "Custom", "standard": "Standard",
         "curve_desc": "Drag points to customize fan curve. X: Temperature (°C), Y: Fan Speed (%)",
+        "apply": "Apply", "revert_default": "Revert to Default",
         "no_sensor": "No sensor data found",
         # Lighting page
         "keyboard_lighting": "Keyboard Lighting", "keyboard_light": "KEYBOARD LIGHT",
@@ -265,6 +268,7 @@ TRANSLATIONS = {
         "power_source_connecting": "Connecting to the power service...",
         "power_source_saving": "Saving profile preferences...",
         "power_source_unavailable": "Power service is unavailable.",
+        "power_service_update_required": "The power daemon is outdated. Reinstall OmenCtl to use this feature.",
         "power_source_ac": "Plugged in",
         "power_source_battery": "Battery",
         "power_source_unknown": "Unknown",

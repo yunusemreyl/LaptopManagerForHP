@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg"
+     xmlns:gpa="https://www.gtk.org/path-animation/1"
+     gpa:version="1"
+     viewBox="0 0 24 24"
+     fill="none"
+     stroke="#2e3436"
+     stroke-width="1.8"
+     stroke-linecap="round"
+     stroke-linejoin="round">
+  <!-- Kernel driver represented as a hardware interface chip. -->
+  <rect gpa:stroke="foreground" x="5" y="5" width="14" height="14" rx="2.5"/>
+  <path gpa:stroke="foreground"
+        d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3"/>
+  <!-- WMI signal path through the driver. -->
+  <path gpa:stroke="foreground" stroke-width="2"
+        d="M8 13h2l1.25-3 1.75 6 1.25-3H16"/>
+</svg>

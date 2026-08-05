@@ -98,9 +98,12 @@ class MUXPage(Gtk.Box):
     def _build_ui(self):
         _dyn_igpu, dyn_dgpu = self._detect_gpus()
 
+        page_header = Gtk.Box(spacing=10, valign=Gtk.Align.CENTER)
+        page_header.append(make_icon("gpu", 24))
         title = Gtk.Label(label=T("mux_switch"), xalign=0)
         title.add_css_class("page-title")
-        self.append(title)
+        page_header.append(title)
+        self.append(page_header)
 
         scroll = Gtk.ScrolledWindow(vexpand=True)
         scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
@@ -121,6 +124,7 @@ class MUXPage(Gtk.Box):
 
         if gpu_info["name"]:
             name_row = Gtk.Box(spacing=20)
+            name_row.append(make_icon("gpu", 18))
             name_row.append(Gtk.Label(label=T("gpu_card"), hexpand=True,
                                       xalign=0, css_classes=["stat-lbl"]))
             name_row.append(Gtk.Label(label=gpu_info["name"],
@@ -129,6 +133,7 @@ class MUXPage(Gtk.Box):
 
             if gpu_info["driver"]:
                 drv_row = Gtk.Box(spacing=20)
+                drv_row.append(make_icon("settings", 18))
                 drv_row.append(Gtk.Label(label=T("driver_ver"), hexpand=True,
                                          xalign=0, css_classes=["stat-lbl"]))
                 drv_row.append(Gtk.Label(label=gpu_info["driver"],
@@ -137,6 +142,7 @@ class MUXPage(Gtk.Box):
 
         # Mode row
         mode_row = Gtk.Box(spacing=20)
+        mode_row.append(make_icon("performance", 18))
         mode_row.append(Gtk.Label(label=T("mode"), hexpand=True, xalign=0, css_classes=["stat-lbl"]))
         self.mode_val = Gtk.Label(label="-", xalign=1, css_classes=["stat-big"])
         mode_row.append(self.mode_val)
@@ -144,6 +150,7 @@ class MUXPage(Gtk.Box):
         
         # Backend row
         backend_row = Gtk.Box(spacing=20)
+        backend_row.append(make_icon("settings", 18))
         backend_row.append(Gtk.Label(label="Backend", hexpand=True, xalign=0, css_classes=["stat-lbl"]))
         self.backend_val = Gtk.Label(label="-", xalign=1, css_classes=["stat-big"])
         backend_row.append(self.backend_val)
@@ -151,19 +158,19 @@ class MUXPage(Gtk.Box):
 
         # Displays row
         disp_row = Gtk.Box(spacing=20)
+        disp_row.append(make_icon("computer", 18))
         disp_row.append(Gtk.Label(label="Bağlı Ekran Çıkışları", hexpand=True, xalign=0, css_classes=["stat-lbl"]))
         self.displays_val = Gtk.Label(label="-", xalign=1, justify=Gtk.Justification.RIGHT, css_classes=["stat-big"])
         disp_row.append(self.displays_val)
         self.gpu_card.append(disp_row)
 
-        scroll_content.append(self.gpu_card)
-
         # Mode selection card
-        card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=25)
+        card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
         card.add_css_class("card")
+        card.add_css_class("mux-mode-card")
 
         header = Gtk.Box(spacing=10)
-        header.append(make_icon("gpu", 22))
+        header.append(make_icon("gpu", 19))
         header.append(Gtk.Label(label=T("gpu_mode"), css_classes=["section-title"]))
         card.append(header)
 
@@ -172,31 +179,38 @@ class MUXPage(Gtk.Box):
         self.mode_buttons: dict = {}
 
         # ── Hybrid (group anchor) ──────────────────────────────────────────────
-        self.hybrid_outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL,
-                                    spacing=10, halign=Gtk.Align.CENTER)
+        self.hybrid_outer = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL,
+                                    spacing=10, hexpand=True)
+        self.hybrid_outer.set_valign(Gtk.Align.CENTER)
         hybrid_icon = make_icon("applications", 26)
-        hybrid_icon.set_pixel_size(80)
+        hybrid_icon.set_pixel_size(52)
         self._hybrid_icon = hybrid_icon
         self.btn_hybrid = Gtk.ToggleButton(child=hybrid_icon)
         self.btn_hybrid.add_css_class("mux-btn")
         self.btn_hybrid.connect("toggled",
             lambda w: self._on_mode_select("hybrid") if w.get_active() else None)
         self.hybrid_outer.append(self.btn_hybrid)
-        self.hybrid_outer.append(Gtk.Label(label=T("hybrid"),
-                                           css_classes=["stat-big"]))
+
+        hybrid_text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=3,
+                              hexpand=True, valign=Gtk.Align.CENTER)
+        hybrid_text.append(Gtk.Label(label=T("hybrid"), xalign=0,
+                                     css_classes=["stat-big"]))
         desc_hybrid = Gtk.Label(label=T("hybrid_desc"))
-        desc_hybrid.set_justify(Gtk.Justification.CENTER)
+        desc_hybrid.set_xalign(0)
+        desc_hybrid.set_wrap(True)
         desc_hybrid.add_css_class("stat-lbl")
-        self.hybrid_outer.append(desc_hybrid)
+        hybrid_text.append(desc_hybrid)
+        self.hybrid_outer.append(hybrid_text)
         self.mux_box.append(self.hybrid_outer)
         self.mode_buttons["hybrid"]    = self.btn_hybrid
         self.mode_buttons["on-demand"] = self.btn_hybrid
 
         # ── Discrete ──────────────────────────────────────────────────────────
-        self.dgpu_outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL,
-                                  spacing=10, halign=Gtk.Align.CENTER)
+        self.dgpu_outer = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL,
+                                  spacing=10, hexpand=True)
+        self.dgpu_outer.set_valign(Gtk.Align.CENTER)
         dgpu_icon = make_icon("gpu", 26)
-        dgpu_icon.set_pixel_size(80)
+        dgpu_icon.set_pixel_size(52)
         dgpu_icon.set_halign(Gtk.Align.CENTER)
         self._dgpu_icon = dgpu_icon
         self.btn_dgpu = Gtk.ToggleButton(child=dgpu_icon)
@@ -205,12 +219,17 @@ class MUXPage(Gtk.Box):
         self.btn_dgpu.connect("toggled",
             lambda w: self._on_mode_select("discrete") if w.get_active() else None)
         self.dgpu_outer.append(self.btn_dgpu)
-        self.dgpu_outer.append(Gtk.Label(label=T("discrete"),
-                                         css_classes=["stat-big"]))
+
+        dgpu_text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=3,
+                            hexpand=True, valign=Gtk.Align.CENTER)
+        dgpu_text.append(Gtk.Label(label=T("discrete"), xalign=0,
+                                   css_classes=["stat-big"]))
         desc_dgpu = Gtk.Label(label=dyn_dgpu)
-        desc_dgpu.set_justify(Gtk.Justification.CENTER)
+        desc_dgpu.set_xalign(0)
+        desc_dgpu.set_wrap(True)
         desc_dgpu.add_css_class("stat-lbl")
-        self.dgpu_outer.append(desc_dgpu)
+        dgpu_text.append(desc_dgpu)
+        self.dgpu_outer.append(dgpu_text)
         self.mux_box.append(self.dgpu_outer)
         self.mode_buttons["discrete"]  = self.btn_dgpu
         self.mode_buttons["dedicated"] = self.btn_dgpu
@@ -221,9 +240,14 @@ class MUXPage(Gtk.Box):
         self.status_label = Gtk.Label(
             label="", css_classes=["stat-lbl"],
             wrap=True, xalign=0.5)
+        self.status_label.set_visible(False)
+        self.status_label.connect(
+            "notify::label",
+            lambda label, _param: label.set_visible(bool(label.get_label().strip())))
         card.append(self.status_label)
 
         scroll_content.append(card)
+        scroll_content.append(self.gpu_card)
 
         # Reboot warning (shown only when reboot is actually required)
         self.warn_card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL,
@@ -292,14 +316,14 @@ class MUXPage(Gtk.Box):
         if content is not None:
             content.set_spacing(14 if bucket == "compact" else 24 if bucket == "spacious" else 20)
 
-        self.mux_box.set_spacing(12 if bucket == "compact" else 26 if bucket == "spacious" else 20)
+        self.mux_box.set_spacing(10 if bucket == "compact" else 18 if bucket == "spacious" else 14)
 
-        icon_size = 64 if bucket == "compact" else 92 if bucket == "spacious" else 80
+        icon_size = 42 if bucket == "compact" else 62 if bucket == "spacious" else 52
         for icon in (getattr(self, "_dgpu_icon", None), getattr(self, "_hybrid_icon", None)):
             if icon is not None:
                 icon.set_pixel_size(icon_size)
 
-        btn_size = 72 if bucket == "compact" else 96 if bucket == "spacious" else 84
+        btn_size = 50 if bucket == "compact" else 70 if bucket == "spacious" else 58
         for mode in ("discrete", "hybrid"):
             btn = self.mode_buttons.get(mode)
             if btn is not None:

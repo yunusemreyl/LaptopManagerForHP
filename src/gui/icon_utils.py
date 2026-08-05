@@ -18,19 +18,16 @@ _ICON_ROOT_CANDIDATES = (
 )
 
 ICON_KEYS = frozenset({
-    "appearance", "applications", "autostart", "back", "battery", "chevron", "clean",
-    "computer", "cpu", "dashboard", "delete", "diagnostics", "disk", "edit",
+    "appearance", "applications", "architecture", "autostart", "back", "battery", "chevron", "clean",
+    "computer", "cpu", "dashboard", "delete", "diagnostics", "disk", "driver", "edit",
     "fan", "game", "github", "gpu", "keyboard", "language", "legal", "lighting",
-    "lock", "memory", "os", "power", "settings", "success", "temperature",
+    "kernel", "lock", "memory", "os", "power", "settings", "success", "temperature",
     "terminal", "theme", "update", "warning", "moon", "performance", "sun",
 })
 
 ICON_ALIASES = {
     "app_profiles": "applications",
     "application": "applications",
-    "architecture": "cpu",
-    "driver": "settings",
-    "kernel": "settings",
     "mux": "gpu",
     "system_info": "computer",
 }

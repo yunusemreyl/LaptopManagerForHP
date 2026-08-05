@@ -15,7 +15,7 @@ from widgets.smooth_scroll import SmoothScrolledWindow
 from widgets.fan_curve import FanCurveWidget
 from components.custom_widgets import OmenHighTechGauge, OmenSpecsBridge
 from utils.system_monitor import SystemMonitor
-from icon_utils import make_icon
+from icon_utils import make_icon, make_icon_label
 import cairo
 
 DEFAULT_MODE_SYNC_DELAY_MS = 1500
@@ -164,19 +164,20 @@ class FanPage(Gtk.Box):
         .mode-selector-capsule {{
             background-color: {capsule_bg};
             border: 1px solid {capsule_border};
-            border-radius: 24px;
+            border-radius: 11px;
             padding: 2px;
-            margin: 18px 0;
+            margin: 0;
         }}
         .mode-selector-btn {{
             background: transparent;
             color: {btn_color};
             border: none;
-            border-radius: 20px;
+            border-radius: 8px;
             font-weight: 600;
-            font-size: 13px;
+            font-size: 11px;
             font-family: "Inter", "Geist", sans-serif;
-            padding: 8px 26px;
+            padding: 5px 10px;
+            min-height: 0;
             transition: all 180ms ease;
             box-shadow: none;
             border-bottom: none;
@@ -231,7 +232,22 @@ class FanPage(Gtk.Box):
             box-shadow: 0 0 8px rgba(125, 211, 252, 0.75);
         }}
         .fan-control-strip {{
-            margin: 6px 0 18px 0;
+            margin: 0;
+        }}
+        .control-cluster {{
+            margin: 0 0 4px 0;
+        }}
+        .control-compact-panel {{
+            background: {card_bg};
+            border: 1px solid {card_border};
+            border-radius: 13px;
+            padding: 9px 10px;
+        }}
+        .compact-control-header {{
+            margin-bottom: 2px;
+        }}
+        .compact-control-header .omen-dashboard-card-title {{
+            margin-bottom: 0;
         }}
         .fan-control-btn {{
             min-width: 0;
@@ -239,6 +255,18 @@ class FanPage(Gtk.Box):
         .sensor-temp-val {{
             font-size: 17px;
             font-weight: 800;
+        }}
+        .sensor-source-label {{
+            font-size: 10px;
+            opacity: 0.55;
+        }}
+        .sensor-count-badge {{
+            font-size: 10px;
+            font-weight: 700;
+            opacity: 0.72;
+            padding: 2px 7px;
+            border-radius: 99px;
+            background: alpha(currentColor, 0.08);
         }}
         .warning-label {{
             color: #ef5b4a;
@@ -378,6 +406,7 @@ class FanPage(Gtk.Box):
             label = mode_mapping.get(mid, mid.replace("-", " ").title())
             btn = Gtk.ToggleButton(label=label)
             btn.add_css_class("mode-selector-btn")
+            btn.set_hexpand(True)
             if self.selector_group:
                 btn.set_group(self.selector_group)
             else:
@@ -496,31 +525,27 @@ class FanPage(Gtk.Box):
         scroll = SmoothScrolledWindow(vexpand=True)
         scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)
-        content.set_margin_top(16)
+        content.set_margin_top(8)
         content.set_margin_start(24)
         content.set_margin_end(24)
         content.set_margin_bottom(20)
         self._content_box = content
         
-        # Fan Control Status Box (Top Right)
-        top_bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
-        top_bar.set_halign(Gtk.Align.END)
+        # Fan status is embedded in the compact control header below.
         self.fc_status_badge = Gtk.Box(valign=Gtk.Align.CENTER)
         self.fc_status_badge.add_css_class("osd")
-        self.fc_status_lbl = Gtk.Label(label="Fan Control: Checking...", css_classes=["caption", "accent"])
+        self.fc_status_lbl = Gtk.Label(label=T("checking"), css_classes=["caption", "accent"])
         self.fc_status_lbl.set_margin_start(10)
         self.fc_status_lbl.set_margin_end(10)
         self.fc_status_lbl.set_margin_top(2)
         self.fc_status_lbl.set_margin_bottom(2)
         self.fc_status_badge.append(self.fc_status_lbl)
-        top_bar.append(self.fc_status_badge)
-        content.append(top_bar)
 
         # ─── 1. DYNAMIC CENTERED SPEEDOMETER GAUGES & COMPACT RAM BRIDGE ───
         gauges_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=32, halign=Gtk.Align.CENTER)
         gauges_row.set_homogeneous(False)
-        gauges_row.set_margin_top(14)
-        gauges_row.set_margin_bottom(14)
+        gauges_row.set_margin_top(2)
+        gauges_row.set_margin_bottom(4)
         self._gauges_row = gauges_row
 
         # CPU Left Gauge (260x260, large!)
@@ -554,7 +579,9 @@ class FanPage(Gtk.Box):
         content.append(self.fan_warning)
 
         # ─── 2. SLEEK SEGMENTED MODE SELECTOR TABS ───
-        self.selector_capsule = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0, halign=Gtk.Align.CENTER)
+        self.selector_capsule = Gtk.Box(
+            orientation=Gtk.Orientation.HORIZONTAL, spacing=0,
+            homogeneous=True, hexpand=True)
         self.selector_capsule.add_css_class("mode-selector-capsule")
         self.selector_group = None
         self.selector_buttons = {}
@@ -568,6 +595,7 @@ class FanPage(Gtk.Box):
         for idx, (mid, label) in enumerate(modes):
             btn = Gtk.ToggleButton(label=label)
             btn.add_css_class("mode-selector-btn")
+            btn.set_hexpand(True)
             if self.selector_group:
                 btn.set_group(self.selector_group)
             else:
@@ -577,31 +605,51 @@ class FanPage(Gtk.Box):
             self.selector_capsule.append(btn)
             self.selector_buttons[mid] = btn
 
-        content.append(self.selector_capsule)
+        profile_strip = Gtk.Box(
+            orientation=Gtk.Orientation.VERTICAL, spacing=4, hexpand=True)
+        profile_strip.add_css_class("control-compact-panel")
+        profile_header = Gtk.Box(spacing=7, valign=Gtk.Align.CENTER)
+        profile_header.add_css_class("compact-control-header")
+        profile_header.append(make_icon("performance", 15))
+        profile_header.append(Gtk.Label(
+            label=T("power_profile"), xalign=0, hexpand=True,
+            css_classes=["omen-dashboard-card-title"]))
+        profile_strip.append(profile_header)
+        profile_strip.append(self.selector_capsule)
 
-        self.fan_control_strip = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        self.fan_control_strip = Gtk.Box(
+            orientation=Gtk.Orientation.VERTICAL, spacing=4, hexpand=True)
         self.fan_control_strip.add_css_class("fan-control-strip")
+        self.fan_control_strip.add_css_class("control-compact-panel")
 
-        fan_control_head = Gtk.Label(label="FAN CONTROL", xalign=0)
-        fan_control_head.add_css_class("omen-dashboard-card-title")
+        fan_control_head = Gtk.Box(spacing=7, valign=Gtk.Align.CENTER)
+        fan_control_head.add_css_class("compact-control-header")
+        fan_control_head.append(make_icon("fan", 15))
+        fan_control_head.append(Gtk.Label(
+            label=T("fan_control"), xalign=0, hexpand=True,
+            css_classes=["omen-dashboard-card-title"]))
+        fan_control_head.append(self.fc_status_badge)
         self.fan_control_strip.append(fan_control_head)
 
-        self.fan_control_capsule = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0, halign=Gtk.Align.CENTER)
+        self.fan_control_capsule = Gtk.Box(
+            orientation=Gtk.Orientation.HORIZONTAL, spacing=0,
+            homogeneous=True, hexpand=True)
         self.fan_control_capsule.add_css_class("mode-selector-capsule")
         self.fan_control_group = None
         self.fan_control_buttons = {}
         self.fan_control_custom_btn = None
 
         fan_levels = [
-            (0, "Auto"),
-            (1, "Performance"),
-            (2, "Max"),
+            (0, T("auto")),
+            (1, T("performance")),
+            (2, T("max")),
         ]
 
         for level, label in fan_levels:
             btn = Gtk.ToggleButton(label=label)
             btn.add_css_class("mode-selector-btn")
             btn.add_css_class("fan-control-btn")
+            btn.set_hexpand(True)
             if self.fan_control_group:
                 btn.set_group(self.fan_control_group)
             else:
@@ -610,14 +658,21 @@ class FanPage(Gtk.Box):
             self.fan_control_capsule.append(btn)
             self.fan_control_buttons[level] = btn
 
-        self.fan_control_custom_btn = Gtk.Button(label="Custom")
+        self.fan_control_custom_btn = Gtk.Button(label=T("custom"))
         self.fan_control_custom_btn.add_css_class("mode-selector-btn")
         self.fan_control_custom_btn.add_css_class("fan-control-btn")
+        self.fan_control_custom_btn.set_hexpand(True)
         self.fan_control_custom_btn.connect("clicked", self._on_custom_fan_control_clicked)
         self.fan_control_capsule.append(self.fan_control_custom_btn)
 
         self.fan_control_strip.append(self.fan_control_capsule)
-        content.append(self.fan_control_strip)
+        self.controls_row = Gtk.Box(
+            orientation=Gtk.Orientation.HORIZONTAL, spacing=10,
+            homogeneous=True, hexpand=True)
+        self.controls_row.add_css_class("control-cluster")
+        self.controls_row.append(profile_strip)
+        self.controls_row.append(self.fan_control_strip)
+        content.append(self.controls_row)
 
         # ─── 3. FAN CURVE CARD (Shown in custom mode) ───
         self.curve_card = Gtk.Revealer()
@@ -640,9 +695,16 @@ class FanPage(Gtk.Box):
         self.fan_curve.on_curve_changed = self._on_curve_changed
         curve_panel.append(self.fan_curve)
 
-        apply_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
-        apply_row.set_halign(Gtk.Align.END)
-        self.curve_apply_btn = Gtk.Button(label="Apply")
+        apply_row = Gtk.Box(
+            orientation=Gtk.Orientation.HORIZONTAL, spacing=8, hexpand=True)
+        self.curve_reset_btn = Gtk.Button()
+        self.curve_reset_btn.set_child(
+            make_icon_label("back", T("revert_default"), size=15))
+        self.curve_reset_btn.connect("clicked", self._on_custom_curve_reset)
+        apply_row.append(self.curve_reset_btn)
+
+        apply_row.append(Gtk.Box(hexpand=True))
+        self.curve_apply_btn = Gtk.Button(label=T("apply"))
         self.curve_apply_btn.add_css_class("suggested-action")
         self.curve_apply_btn.connect("clicked", self._on_custom_curve_apply)
         apply_row.append(self.curve_apply_btn)
@@ -667,8 +729,15 @@ class FanPage(Gtk.Box):
         self.sensor_card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
         self.sensor_card.add_css_class("omen-dashboard-card")
         
-        lbl_s = Gtk.Label(label=T("system_status"), xalign=0, css_classes=["omen-dashboard-card-title"])
-        self.sensor_card.append(lbl_s)
+        sensor_header = Gtk.Box(spacing=8, valign=Gtk.Align.CENTER)
+        sensor_header.append(make_icon("temperature", 17))
+        lbl_s = Gtk.Label(
+            label=T("system_status"), xalign=0, hexpand=True,
+            css_classes=["omen-dashboard-card-title"])
+        sensor_header.append(lbl_s)
+        self.sensor_count_lbl = Gtk.Label(label="0", css_classes=["sensor-count-badge"])
+        sensor_header.append(self.sensor_count_lbl)
+        self.sensor_card.append(sensor_header)
         self.sensor_card.append(Gtk.Separator())
 
         # Scrollable sensor list
@@ -844,15 +913,21 @@ class FanPage(Gtk.Box):
             if bucket == "compact":
                 content.set_margin_start(14)
                 content.set_margin_end(14)
-                content.set_spacing(12)
+                content.set_spacing(9)
             elif bucket == "spacious":
                 content.set_margin_start(34)
                 content.set_margin_end(34)
-                content.set_spacing(20)
+                content.set_spacing(14)
             else:
                 content.set_margin_start(24)
                 content.set_margin_end(24)
-                content.set_spacing(16)
+                content.set_spacing(11)
+
+        controls = getattr(self, "controls_row", None)
+        if controls is not None:
+            controls.set_orientation(
+                Gtk.Orientation.VERTICAL if bucket == "compact"
+                else Gtk.Orientation.HORIZONTAL)
 
         row = getattr(self, "_gauges_row", None)
         if row is not None:
@@ -930,6 +1005,12 @@ class FanPage(Gtk.Box):
 
     def _on_custom_fan_control_clicked(self, _btn):
         self._open_custom_curve_editor()
+
+    def _on_custom_curve_reset(self, _btn):
+        """Restore the editor to the built-in curve; Apply persists it."""
+        self.custom_points = list(self.default_points)
+        if hasattr(self, "fan_curve") and self.fan_curve is not None:
+            self.fan_curve.set_points(self.custom_points)
 
     def _on_custom_curve_apply(self, _btn):
         if hasattr(self, "fan_curve") and self.fan_curve is not None:
@@ -1260,10 +1341,10 @@ class FanPage(Gtk.Box):
 
         # Update Fan Control Status Box
         if fan_info.get("available", False):
-            self.fc_status_lbl.set_label(T("fan_active") if "fan_active" in globals() else "Fan Control: Active")
+            self.fc_status_lbl.set_label(T("active"))
             self.fc_status_lbl.set_css_classes(["caption", "success"])
         else:
-            self.fc_status_lbl.set_label(T("fan_inactive") if "fan_inactive" in globals() else "Fan Control: Inactive")
+            self.fc_status_lbl.set_label(T("inactive"))
             self.fc_status_lbl.set_css_classes(["caption", "error"])
 
         # On first refresh, sync fan control mode from daemon's actual state
@@ -1462,49 +1543,65 @@ class FanPage(Gtk.Box):
         return True
 
     def _update_sensor_list(self, sensors):
-        """Populate the left bottom card with a beautifully formatted list of real-time temperatures."""
-        if len(sensors) != len(self._sensor_labels):
+        """Populate the status card with validated, stable sensor rows."""
+        sensor_keys = {
+            s.get("id", f"{s['driver']}_{s['label']}") for s in sensors
+        }
+        if sensor_keys != set(self._sensor_labels):
             while child := self.sensor_list_box.get_first_child():
                 self.sensor_list_box.remove(child)
             self._sensor_labels.clear()
 
+        self.sensor_count_lbl.set_label(str(len(sensors)))
+
         for s in sensors:
-            key = f"{s['driver']}_{s['label']}"
-            val_str = f"{int(s['temp'])}°C"
+            key = s.get("id", f"{s['driver']}_{s['label']}")
+            temp_c = float(s["temp"])
+            display_temp = temp_c if self.temp_unit == "C" else temp_c * 9 / 5 + 32
+            val_str = f"{display_temp:.1f}°{self.temp_unit}"
 
             # Temperature color coding
             is_dark = getattr(self, "is_dark", True)
             if is_dark:
                 color = "#a0aec0"
-                if s["temp"] >= 78.0:
+                if temp_c >= 78.0:
                     color = "#ef5b4a"
-                elif s["temp"] >= 62.0:
+                elif temp_c >= 62.0:
                     color = "#f6ad55"
-                elif s["temp"] > 0:
+                elif temp_c > 0:
                     color = "#00f0ff"
             else:
                 color = "#475569"
-                if s["temp"] >= 78.0:
+                if temp_c >= 78.0:
                     color = "#d93025"
-                elif s["temp"] >= 62.0:
+                elif temp_c >= 62.0:
                     color = "#b06000"
-                elif s["temp"] > 0:
+                elif temp_c > 0:
                     color = "#0066cc"
 
             if key in self._sensor_labels:
-                _lbl_name, lbl_temp = self._sensor_labels[key]
+                lbl_name, lbl_source, lbl_temp = self._sensor_labels[key]
+                lbl_name.set_label(s["label"])
+                lbl_source.set_label(s["driver"])
                 lbl_temp.set_markup(f"<span color='{color}'><b>{val_str}</b></span>")
             else:
                 row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
                 row.add_css_class("sensor-row")
-                
-                bullet = Gtk.Label(label="• ")
-                bullet.set_opacity(0.4)
-                row.append(bullet)
 
-                lbl_name = Gtk.Label(label=s["label"], xalign=0, css_classes=["dim-label"])
-                lbl_name.set_hexpand(True)
-                row.append(lbl_name)
+                sensor_icon = make_icon("temperature", 14)
+                sensor_icon.set_opacity(0.6)
+                row.append(sensor_icon)
+
+                text_box = Gtk.Box(
+                    orientation=Gtk.Orientation.VERTICAL, spacing=0, hexpand=True)
+                lbl_name = Gtk.Label(
+                    label=s["label"], xalign=0, css_classes=["dim-label"])
+                text_box.append(lbl_name)
+                lbl_source = Gtk.Label(
+                    label=s["driver"], xalign=0,
+                    css_classes=["sensor-source-label"])
+                text_box.append(lbl_source)
+                row.append(text_box)
 
                 lbl_temp = Gtk.Label(xalign=1)
                 lbl_temp.add_css_class("sensor-temp-val")
@@ -1513,7 +1610,7 @@ class FanPage(Gtk.Box):
 
                 self._sensor_list_box_row = row
                 self.sensor_list_box.append(row)
-                self._sensor_labels[key] = (lbl_name, lbl_temp)
+                self._sensor_labels[key] = (lbl_name, lbl_source, lbl_temp)
 
         if not sensors:
             if not self.sensor_list_box.get_first_child():

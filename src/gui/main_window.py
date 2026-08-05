@@ -1690,6 +1690,9 @@ class HPManagerWindow(Gtk.ApplicationWindow):
             padding: 28px;
             box-shadow: 0 12px 22px rgba(0,0,0,0.14);
         }}
+        .card.mux-mode-card {{
+            padding: 18px;
+        }}
         .inner-panel {{
             background: rgba(152, 156, 166, 0.07);
             border: 1px solid alpha({accent}, 0.14);

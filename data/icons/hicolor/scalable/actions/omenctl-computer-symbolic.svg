@@ -1,1 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" xmlns:gpa="https://www.gtk.org/path-animation/1" gpa:version="1" viewBox="0 0 24 24" fill="none" stroke="#2e3436" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect gpa:stroke="foreground" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" x="3" y="3" width="18" height="13" rx="2"/><path gpa:stroke="foreground" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M8 21h8M12 16v5"/></svg>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:gpa="https://www.gtk.org/path-animation/1" gpa:version="1" viewBox="0 0 24 24" fill="none" stroke="#2e3436" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+  <rect gpa:stroke="foreground" x="4.5" y="3.5" width="15" height="11.5" rx="1.8"/>
+  <path gpa:stroke="foreground" d="M2.75 18h18.5l-1.2 2.5H3.95Z"/>
+  <path gpa:stroke="foreground" d="M10 18.1h4"/>
+</svg>

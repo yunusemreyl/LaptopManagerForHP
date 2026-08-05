@@ -5,12 +5,68 @@ import os
 import shutil
 import json
 import glob
+import math
 from gi.repository import GLib
 from i18n import T
 import concurrent.futures
 
 _DBUS_TIMEOUT = 5
 _dbus_pool = concurrent.futures.ThreadPoolExecutor(max_workers=2, thread_name_prefix="sysmon-dbus")
+
+MIN_SENSOR_TEMP_C = 1.0
+MAX_SENSOR_TEMP_C = 115.0
+
+
+def is_plausible_temperature(value):
+    """Return whether a hwmon value can represent a live laptop sensor."""
+    try:
+        temperature = float(value)
+    except (TypeError, ValueError):
+        return False
+    return (
+        math.isfinite(temperature)
+        and MIN_SENSOR_TEMP_C <= temperature <= MAX_SENSOR_TEMP_C
+    )
+
+
+def select_sensor_candidates(driver, candidates):
+    """Filter invalid channels and prefer NVMe's user-facing composite value."""
+    valid = [
+        sensor for sensor in candidates
+        if is_plausible_temperature(sensor.get("temp"))
+    ]
+    if str(driver).lower() == "nvme":
+        composite = [
+            sensor for sensor in valid
+            if str(sensor.get("raw_label", "")).lower() == "composite"
+        ]
+        if composite:
+            return composite
+    return valid
+
+
+def friendly_sensor_label(driver, raw_label, index=1):
+    """Create compact names suitable for the status card."""
+    drv = str(driver).lower()
+    label = str(raw_label).strip()
+    lower_label = label.lower()
+    if drv in ("k10temp", "coretemp", "zenpower"):
+        if lower_label.startswith("core "):
+            return label
+        return "CPU"
+    if drv in ("amdgpu", "radeon", "nouveau", "nvidia"):
+        return "GPU"
+    if drv == "nvme" and lower_label == "composite":
+        return "NVMe"
+    if drv == "spd5118":
+        return f"RAM {index}"
+    if drv.startswith(("mt", "iwl")):
+        return "Wi-Fi"
+    if drv.startswith("acpitz"):
+        suffix = drv.rsplit("_", 1)[-1]
+        zone_number = int(suffix) + 1 if suffix.isdigit() else index
+        return f"ACPI {zone_number}"
+    return label or str(driver)
 
 def _dbus_call(fn, *args, timeout=_DBUS_TIMEOUT):
     fut = _dbus_pool.submit(fn, *args)
@@ -245,15 +301,19 @@ class SystemMonitor(threading.Thread):
                             gpu_ppab_state = f.read().strip() == "1"
             except Exception: pass
 
-            # Fallbacks for temperatures
+            # Reject disconnected/corrupt D-Bus values before using fallbacks.
+            c = float(c) if is_plausible_temperature(c) else 0.0
+            g = float(g) if is_plausible_temperature(g) else 0.0
             if not c:
-                try:
-                    for path in glob.glob("/sys/class/thermal/thermal_zone*/temp"):
+                for path in glob.glob("/sys/class/thermal/thermal_zone*/temp"):
+                    try:
                         with open(path) as f:
-                            c = int(f.read().strip()) / 1000
+                            candidate = int(f.read().strip()) / 1000
+                        if is_plausible_temperature(candidate):
+                            c = candidate
                             break
-                except Exception: c = 42.0
-            if not g: g = 0.0
+                    except Exception:
+                        continue
 
             # Conflict checking
             self._conflict_counter += 1
@@ -295,6 +355,7 @@ class SystemMonitor(threading.Thread):
 
     def _get_all_sensors(self):
         sensors = []
+        label_counts = {}
         try:
             for d in sorted(os.listdir("/sys/class/hwmon")):
                 path = os.path.join("/sys/class/hwmon", d)
@@ -304,6 +365,7 @@ class SystemMonitor(threading.Thread):
                         name = f.read().strip()
                 except Exception: continue
 
+                candidates = []
                 for tf in sorted(glob.glob(os.path.join(path, "temp*_input"))):
                     try:
                         with open(tf) as f:
@@ -315,22 +377,26 @@ class SystemMonitor(threading.Thread):
                         except Exception:
                             label = os.path.basename(tf).replace("_input", "")
                         
-                        if label.lower() == "package id 0":
-                            label = "CPU Package"
-                        elif label.lower().startswith("core "):
-                            try:
-                                core_num = int(label.split()[1])
-                                label = f"Core {core_num + 1}"
-                            except ValueError: pass
-                        elif label.lower() == "tctl":
-                            label = "CPU (tctl)"
-                        elif label.lower() == "tdie":
-                            label = "CPU (tdie)"
-                            
-                        sensors.append({"driver": name, "label": label, "temp": temp})
+                        candidates.append({
+                            "id": f"{d}:{os.path.basename(tf)}",
+                            "driver": name,
+                            "raw_label": label,
+                            "temp": temp,
+                        })
                     except Exception: pass
+                for sensor in select_sensor_candidates(name, candidates):
+                    count_key = name.lower()
+                    label_counts[count_key] = label_counts.get(count_key, 0) + 1
+                    sensor["label"] = friendly_sensor_label(
+                        name, sensor["raw_label"], label_counts[count_key])
+                    sensors.append(sensor)
         except Exception: pass
-        return sensors
+        priority = {"CPU": 0, "GPU": 1, "NVMe": 2, "RAM": 3, "Wi-Fi": 4, "ACPI": 5}
+        return sorted(
+            sensors,
+            key=lambda sensor: next(
+                (rank for prefix, rank in priority.items()
+                 if sensor["label"].startswith(prefix)), 10))
 
     def get_data(self):
         with self.lock:
@@ -343,4 +409,3 @@ class SystemMonitor(threading.Thread):
 # ═════════════════════════════════════════════════════════════════════════════
 #  PERFORMANCE & FAN PAGE MAIN COMPONENT
 # ═════════════════════════════════════════════════════════════════════════════
-

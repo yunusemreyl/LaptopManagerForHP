@@ -75,19 +75,21 @@ impl RgbHardware {
     }
 
     fn write_zone(&self, zone: usize, hex_color: &str) {
-        let Some(ref base) = self.driver_path else { return; };
-        if zone > 7 { return; }
-
-        let actual_zone = if zone <= 3 { 3 - zone } else { zone };
-
-        let filename = if self.is_new_driver {
-            format!("zone{:02}", actual_zone)
-        } else {
-            format!("zone{}", actual_zone)
-        };
-        let path = format!("{}/{}", base, filename);
-        let _ = std::fs::write(&path, hex_color);
+    if zone > 7 { return; }
+    
+    // Muunnetaan hex-koodi RGB-arvoiksi
+    let color_clean = hex_color.trim_start_matches('#');
+    
+    // Jos nykyistä sysfs-ohjaintiedostoa ei löydy, käytetään HP WMI / sysfs -ohjausta
+    if let Some(ref path) = self.driver_path {
+        let zone_file = format!("{}/zone{}", path, zone);
+        let _ = std::fs::write(&zone_file, color_clean);
+    } else {
+        // Fallback HP WMI 4-zone -kutsulle
+        let wmi_path = format!("/sys/devices/platform/hp-wmi/rgb_zone{}", zone);
+        let _ = std::fs::write(&wmi_path, color_clean);
     }
+}
 
     fn write_all(&self, hex_color: &str) {
         let Some(ref base) = self.driver_path else { return; };

@@ -24,6 +24,7 @@ fn main() {
     app.connect_startup(|_| {
         adw::init().expect("Failed to initialize libadwaita");
         i18n::init();
+        ensure_tray_running();
         
         let display = gtk::gdk::Display::default().unwrap();
         let icon_theme = gtk::IconTheme::for_display(&display);
@@ -88,11 +89,31 @@ fn apply_appearance_mode() {
     }
 }
 
+fn ensure_tray_running() {
+    std::thread::spawn(|| {
+        let spawned = std::process::Command::new("omen-tray")
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn();
+
+        if spawned.is_err() {
+            let _ = std::process::Command::new("/usr/bin/omen-tray")
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn();
+        }
+    });
+}
+
 fn build_ui(app: &adw::Application) {
+    ensure_tray_running();
     apply_startup_profile();
     apply_appearance_mode();
 
-    if let Some(window) = app.active_window() {
+    if let Some(window) = app.active_window().or_else(|| app.windows().first().cloned()) {
+        window.set_visible(true);
         window.present();
         return;
     }

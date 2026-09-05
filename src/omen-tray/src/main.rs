@@ -1,11 +1,42 @@
 use ksni::menu::{CheckmarkItem, StandardItem, SubMenu};
 use ksni::MenuItem;
-use log::{error, info};
+use log::{error, info, warn};
+use std::fs::OpenOptions;
+use std::os::unix::io::AsRawFd;
 use std::process::Command;
 use std::sync::OnceLock;
 use zbus::{Connection, Result as ZbusResult};
 
 static RUNTIME: OnceLock<tokio::runtime::Handle> = OnceLock::new();
+
+fn acquire_single_instance_lock() -> Option<std::fs::File> {
+    let runtime_dir = std::env::var("XDG_RUNTIME_DIR")
+        .unwrap_or_else(|_| format!("/tmp/user-{}", unsafe { libc::getuid() }));
+    let _ = std::fs::create_dir_all(&runtime_dir);
+    let lock_path = format!("{}/omen-tray.lock", runtime_dir);
+
+    let file = match OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(&lock_path)
+    {
+        Ok(f) => f,
+        Err(e) => {
+            warn!("Kilit dosyası açılamadı ({}): {}, tekillik kontrolü atlanıyor.", lock_path, e);
+            return None;
+        }
+    };
+
+    let fd = file.as_raw_fd();
+    let res = unsafe { libc::flock(fd, libc::LOCK_EX | libc::LOCK_NB) };
+    if res != 0 {
+        return None;
+    }
+
+    Some(file)
+}
 
 fn spawn_task<F>(f: F)
 where
@@ -179,6 +210,11 @@ impl ksni::Tray for Tray {
                 label: "❌ Çıkış".into(),
                 icon_name: "application-exit".into(),
                 activate: Box::new(|_| {
+                    let _ = Command::new("pkill")
+                        .arg("-TERM")
+                        .arg("-x")
+                        .arg("omen-gui")
+                        .output();
                     std::process::exit(0);
                 }),
                 ..Default::default()
@@ -264,6 +300,14 @@ async fn set_fan_mode(mode: &str) {
 async fn main() {
     env_logger::init();
     info!("omen-tray başlatılıyor...");
+
+    let _lock = match acquire_single_instance_lock() {
+        Some(lock) => lock,
+        None => {
+            info!("omen-tray zaten çalışıyor. İkinci kopya sonlandırılıyor.");
+            return;
+        }
+    };
 
     RUNTIME
         .set(tokio::runtime::Handle::current())

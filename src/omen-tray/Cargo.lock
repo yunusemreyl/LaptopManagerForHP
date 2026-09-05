@@ -772,6 +772,7 @@ dependencies = [
  "env_logger",
  "glib",
  "ksni",
+ "libc",
  "log",
  "serde",
  "serde_json",

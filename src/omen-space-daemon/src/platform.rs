@@ -143,7 +143,7 @@ fn find_gpu_temp_path() -> Option<String> {
             let path = entry.path();
             if let Ok(name) = std::fs::read_to_string(path.join("name")) {
                 let name = name.trim().to_lowercase();
-                if ["amdgpu", "i915", "nouveau"].contains(&name.as_str()) {
+                if ["amdgpu", "i915", "nouveau", "nvidia"].contains(&name.as_str()) {
                     let tp = path.join("temp1_input");
                     if tp.exists() {
                         return Some(tp.to_string_lossy().to_string());

@@ -108,7 +108,7 @@ fn init_sensor_paths() -> SensorPaths {
                     if f1.exists() { fan1_path = Some(f1); }
                     let f2 = entry.join("fan2_input");
                     if f2.exists() { fan2_path = Some(f2); }
-                } else if name.contains("nouveau") || name.contains("amdgpu") {
+                } else if name.contains("nouveau") || name.contains("amdgpu") || name.contains("nvidia") {
                     let t1 = entry.join("temp1_input");
                     if t1.exists() { gpu_temp_path = Some(t1); }
                 }
@@ -475,22 +475,30 @@ pub fn fetch_system_stats() -> SystemStats {
             stats.total_pwr = 16.0;
         }
     }
+    // Pakotetaan NVML-haku NVIDIAlle ja skaalataan se murtoluvuksi
+if let Ok(nvml) = nvml_wrapper::Nvml::init() {
+    if let Ok(device) = nvml.device_by_index(0) {
+        if let Ok(utilization) = device.utilization_rates() {
+            stats.gpu_load = utilization.gpu as f64 / 100.0;
+        }
+    }
+}
 
-    if stats.cpu_temp == 0 { stats.cpu_temp = 45; }
-    if stats.gpu_temp == 0 { stats.gpu_temp = stats.cpu_temp.saturating_sub(4); }
-    if stats.cpu_pwr == 0.0 && !real_pwr { stats.cpu_pwr = stats.total_pwr * 0.45; }
-    if stats.gpu_pwr == 0.0 && !real_pwr { stats.gpu_pwr = stats.total_pwr * 0.15; }
+if stats.cpu_temp == 0 { stats.cpu_temp = 45; }
+if stats.gpu_temp == 0 { stats.gpu_temp = stats.cpu_temp.saturating_sub(4); }
+if stats.cpu_pwr == 0.0 && !real_pwr { stats.cpu_pwr = stats.total_pwr * 0.45; }
+if stats.gpu_pwr == 0.0 && !real_pwr { stats.gpu_pwr = stats.total_pwr * 0.15; }
 
-    // Sanitize any NaNs that might crash JSON serialization
-    if stats.cpu_load.is_nan() { stats.cpu_load = 0.0; }
-    if stats.cpu_pwr.is_nan() { stats.cpu_pwr = 0.0; }
-    if stats.gpu_load.is_nan() { stats.gpu_load = 0.0; }
-    if stats.gpu_pwr.is_nan() { stats.gpu_pwr = 0.0; }
-    if stats.ram_frac.is_nan() { stats.ram_frac = 0.0; }
-    if stats.disk_frac.is_nan() { stats.disk_frac = 0.0; }
-    if stats.total_pwr.is_nan() { stats.total_pwr = 0.0; }
+// Sanitize any NaNs that might crash JSON serialization
+if stats.cpu_load.is_nan() { stats.cpu_load = 0.0; }
+if stats.cpu_pwr.is_nan() { stats.cpu_pwr = 0.0; }
+if stats.gpu_load.is_nan() { stats.gpu_load = 0.0; }
+if stats.gpu_pwr.is_nan() { stats.gpu_pwr = 0.0; }
+if stats.ram_frac.is_nan() { stats.ram_frac = 0.0; }
+if stats.disk_frac.is_nan() { stats.disk_frac = 0.0; }
+if stats.total_pwr.is_nan() { stats.total_pwr = 0.0; }
 
-    stats
+stats
 }
 
 #[inline(always)]

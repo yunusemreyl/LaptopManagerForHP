@@ -276,7 +276,8 @@ fn get_all_models() -> &'static [ModelCapabilities] {
         model!("8A14", "OMEN 15 (2020) Intel", 2020, "OMEN", { has_mux_switch: false, supports_fan_control_ec: true }),
         model!("878C", "OMEN Laptop 15-ek0xxx", 2020, "OMEN", { has_mux_switch: false, supports_fan_control_ec: true, notes: "Direct EC fan control highly recommended when hp-wmi fails".to_string() }),
         model!("878A", "OMEN 15 (2020) AMD", 2020, "OMEN", { has_mux_switch: false, supports_fan_control_ec: true }),
-        
+        model!("878A", "OMEN Laptop 15-ek0xxx", 2020, "OMEN", { has_mux_switch: true, supports_fan_control_wmi: true, has_four_zone_rgb: true }),
+
         // OMEN 16 Series
         model!("8A43", "OMEN by HP Gaming Laptop 16-n0xxx", 2022, "OMEN", { has_mux_switch: true, supports_fan_control_ec: false }),
         model!("8BAA", "OMEN by HP Gaming Laptop 16-wf0xxx", 2023, "OMEN", { has_mux_switch: true, supports_gpu_power_boost: true, supports_fan_control_ec: false }),

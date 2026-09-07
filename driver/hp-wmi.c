@@ -2949,10 +2949,24 @@ static struct platform_driver hp_wmi_driver __refdata = {
  * (the *non-_sync* variant). This is deliberate: _sync would deadlock
  * when called from within the keep_alive_handler workqueue item itself.
  * External callers that need a synchronous cancel must call
- * cancel_delayed_work_sync() *before* taking hwmon_lock, then call this
  * function with the lock held (see the PWM_MODE_AUTO branch in
  * hp_wmi_hwmon_write()).
  */
+static void hp_wmi_reapply_thermal_profile(void)
+{
+	if (!platform_profile_support)
+		return;
+
+	if (is_omen_thermal_profile())
+		platform_profile_omen_set_ec(active_platform_profile);
+	else if (is_victus_thermal_profile())
+		platform_profile_victus_set_ec(active_platform_profile);
+	else if (is_victus_s_thermal_profile())
+		platform_profile_victus_s_set_ec(active_platform_profile);
+	else
+		thermal_profile_set(thermal_profile_get());
+}
+
 static int hp_wmi_apply_fan_settings(struct hp_wmi_hwmon_priv *priv)
 {
 	int ret = 0;
@@ -3002,8 +3016,17 @@ static int hp_wmi_apply_fan_settings(struct hp_wmi_hwmon_priv *priv)
 		return -EINVAL;
 	}
 
-	if (ret >= 0)
+	if (ret >= 0) {
 		priv->prev_mode = priv->mode;
+		
+		/*
+		 * WMI fan speed writes can cause the embedded controller (EC)
+		 * to silently reset the active thermal profile, which may disable
+		 * Dynamic Boost and throttle GPU wattage. Re-apply the cached
+		 * thermal profile here to ensure it persists.
+		 */
+		hp_wmi_reapply_thermal_profile();
+	}
 
 	return ret;
 }

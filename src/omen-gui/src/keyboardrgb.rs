@@ -732,10 +732,6 @@ pub fn build_page() -> adw::PreferencesPage {
             .subtitle(i18n::t("lightbar_enable_sub"))
             .build();
         lb_enable_row.set_active(true);
-        lb_enable_row.connect_active_notify(move |row| {
-            let is_active = row.is_active();
-            crate::daemon_client::set_global_sync(is_active, 100, "ltr");
-        });
         lb_group.add(&lb_enable_row);
 
         let lb_effect_model = gtk::StringList::new(&[
@@ -787,6 +783,17 @@ pub fn build_page() -> adw::PreferencesPage {
         let lb_widget = build_interactive_lightbar(&state_json_opt);
         lb_preview_group.add(&lb_widget);
         page.add(&lb_preview_group);
+
+        let lb_effect_row_c = lb_effect_row.clone();
+        let lb_bright_row_c = lb_bright_row.clone();
+        let lb_preview_group_c = lb_preview_group.clone();
+
+        lb_enable_row.connect_active_notify(move |row| {
+            let is_active = row.is_active();
+            lb_effect_row_c.set_visible(is_active);
+            lb_bright_row_c.set_visible(is_active);
+            lb_preview_group_c.set_visible(is_active);
+        });
     }
 
     page

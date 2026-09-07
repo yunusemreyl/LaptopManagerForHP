@@ -144,8 +144,7 @@ fn show_firmware_update_modal(window: &adw::ApplicationWindow) {
                 if out.status.success() {
                     dialog_clone.set_body(i18n::t("no_updates"));
                 } else {
-                    let err = String::from_utf8_lossy(&out.stderr);
-                    dialog_clone.set_body(&format!("{}:\n{}", i18n::t("update_failed"), err));
+                    dialog_clone.set_body(i18n::t("update_failed"));
                 }
             } else {
                 dialog_clone.set_body(i18n::t("fwupdmgr_missing"));

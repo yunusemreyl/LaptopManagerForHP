@@ -99,32 +99,6 @@ pub fn build_page(window: &adw::ApplicationWindow) -> gtk::Box {
 
     page.append(&fw_group);
 
-    // ── Update Channel group ──────────────────────────────────
-    let channel_group = adw::PreferencesGroup::builder()
-        .title(i18n::t("update_channel_group"))
-        .build();
-
-    let channel_row = adw::ComboRow::builder()
-        .title(i18n::t("channel_row"))
-        .subtitle(i18n::t("channel_sub"))
-        .build();
-    let channel_model = gtk::StringList::new(&[
-        i18n::t("channel_stable"),
-        i18n::t("channel_beta"),
-        i18n::t("channel_dev"),
-    ]);
-    channel_row.set_model(Some(&channel_model));
-    channel_group.add(&channel_row);
-
-    let auto_row = adw::SwitchRow::builder()
-        .title(i18n::t("auto_update_check"))
-        .subtitle(i18n::t("auto_update_sub"))
-        .build();
-    auto_row.set_active(true);
-    channel_group.add(&auto_row);
-
-    page.append(&channel_group);
-
     page
 }
 

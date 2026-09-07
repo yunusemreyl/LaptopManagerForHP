@@ -1,5 +1,8 @@
+mod i18n;
+
 use ksni::menu::{CheckmarkItem, StandardItem, SubMenu};
 use ksni::MenuItem;
+use i18n::t;
 use log::{error, info};
 use std::process::Command;
 use std::sync::OnceLock;
@@ -78,6 +81,7 @@ fn spawn_gui() {
 struct Tray {
     power_profile: String,
     fan_mode: String,
+    gpu_mode: String,
 }
 
 impl ksni::Tray for Tray {
@@ -107,19 +111,23 @@ impl ksni::Tray for Tray {
 
     fn tool_tip(&self) -> ksni::ToolTip {
         let p_label = match self.power_profile.as_str() {
-            "performance" => "Performans",
-            "power-saver" | "eco" => "Eko",
-            _ => "Dengeli",
+            "performance" => t("perf"),
+            "power-saver" | "eco" => t("eco"),
+            _ => t("balanced"),
         };
         let f_label = match self.fan_mode.as_str() {
-            "max" => "Maksimum",
-            "ec" => "EC (Donanım)",
-            "custom" => "Özel",
-            _ => "Otomatik",
+            "max" => t("max"),
+            "ec" => t("ec"),
+            "custom" => t("custom"),
+            _ => t("auto"),
+        };
+        let g_label = match self.gpu_mode.as_str() {
+            "discrete" => t("tt_gpu_discrete"),
+            _ => t("tt_gpu_hybrid"),
         };
         ksni::ToolTip {
             title: "OMEN Space".into(),
-            description: format!("Güç: {}\nFan: {}", p_label, f_label),
+            description: format!("{}: {}\n{}: {}\n{}: {}", t("tt_power"), p_label, t("tt_fan"), f_label, t("tt_gpu"), g_label),
             icon_name: "omenspace".into(),
             ..Default::default()
         }
@@ -132,10 +140,11 @@ impl ksni::Tray for Tray {
     fn menu(&self) -> Vec<ksni::MenuItem<Self>> {
         let cur_power = self.power_profile.as_str();
         let cur_fan = self.fan_mode.as_str();
+        let cur_gpu = self.gpu_mode.as_str();
 
         vec![
             StandardItem {
-                label: "OMENSpace'i Aç".into(),
+                label: t("tray_open").into(),
                 icon_name: "omenspace".into(),
                 activate: Box::new(|_| {
                     spawn_gui();
@@ -145,10 +154,10 @@ impl ksni::Tray for Tray {
             .into(),
             MenuItem::Separator,
             SubMenu {
-                label: "⚡ Güç Profili".into(),
+                label: t("power_profile").into(),
                 submenu: vec![
                     CheckmarkItem {
-                        label: "🔥 Performans".into(),
+                        label: t("perf").into(),
                         checked: cur_power == "performance",
                         activate: Box::new(|tray: &mut Self| {
                             tray.power_profile = "performance".into();
@@ -160,7 +169,7 @@ impl ksni::Tray for Tray {
                     }
                     .into(),
                     CheckmarkItem {
-                        label: "⚖️ Dengeli".into(),
+                        label: t("balanced").into(),
                         checked: cur_power == "balanced",
                         activate: Box::new(|tray: &mut Self| {
                             tray.power_profile = "balanced".into();
@@ -172,7 +181,7 @@ impl ksni::Tray for Tray {
                     }
                     .into(),
                     CheckmarkItem {
-                        label: "🍃 Eko".into(),
+                        label: t("eco").into(),
                         checked: cur_power == "power-saver" || cur_power == "eco",
                         activate: Box::new(|tray: &mut Self| {
                             tray.power_profile = "power-saver".into();
@@ -188,10 +197,10 @@ impl ksni::Tray for Tray {
             }
             .into(),
             SubMenu {
-                label: "❄️ Fan Modu".into(),
+                label: t("fan_mode").into(),
                 submenu: vec![
                     CheckmarkItem {
-                        label: "🤖 Otomatik".into(),
+                        label: t("auto").into(),
                         checked: cur_fan == "auto",
                         activate: Box::new(|tray: &mut Self| {
                             tray.fan_mode = "auto".into();
@@ -203,7 +212,7 @@ impl ksni::Tray for Tray {
                     }
                     .into(),
                     CheckmarkItem {
-                        label: "🌪️ Maksimum".into(),
+                        label: t("max").into(),
                         checked: cur_fan == "max",
                         activate: Box::new(|tray: &mut Self| {
                             tray.fan_mode = "max".into();
@@ -215,7 +224,7 @@ impl ksni::Tray for Tray {
                     }
                     .into(),
                     CheckmarkItem {
-                        label: "⚙️ EC (Donanım)".into(),
+                        label: t("ec").into(),
                         checked: cur_fan == "ec",
                         activate: Box::new(|tray: &mut Self| {
                             tray.fan_mode = "ec".into();
@@ -230,9 +239,40 @@ impl ksni::Tray for Tray {
                 ..Default::default()
             }
             .into(),
+            SubMenu {
+                label: t("gpu_mode").into(),
+                submenu: vec![
+                    CheckmarkItem {
+                        label: t("hybrid").into(),
+                        checked: cur_gpu == "hybrid",
+                        activate: Box::new(|tray: &mut Self| {
+                            tray.gpu_mode = "hybrid".into();
+                            spawn_task(async {
+                                set_gpu_mode("hybrid").await;
+                            });
+                        }),
+                        ..Default::default()
+                    }
+                    .into(),
+                    CheckmarkItem {
+                        label: t("discrete").into(),
+                        checked: cur_gpu == "discrete",
+                        activate: Box::new(|tray: &mut Self| {
+                            tray.gpu_mode = "discrete".into();
+                            spawn_task(async {
+                                set_gpu_mode("discrete").await;
+                            });
+                        }),
+                        ..Default::default()
+                    }
+                    .into(),
+                ],
+                ..Default::default()
+            }
+            .into(),
             MenuItem::Separator,
             StandardItem {
-                label: "❌ Çıkış".into(),
+                label: t("exit").into(),
                 icon_name: "application-exit".into(),
                 activate: Box::new(|_| {
                     let _ = Command::new("pkill").arg("-TERM").arg("-x").arg("omen-gui").output();
@@ -266,6 +306,16 @@ trait Fan {
     async fn get_fan_mode(&self) -> zbus::Result<String>;
 }
 
+#[zbus::proxy(
+    interface = "org.hp.omen.Mux",
+    default_service = "org.hp.omen",
+    default_path = "/org/hp/omen/Mux"
+)]
+trait Mux {
+    async fn set_gpu_mode(&self, mode: &str) -> zbus::Result<String>;
+    async fn get_gpu_info(&self) -> zbus::Result<String>;
+}
+
 async fn get_conn() -> ZbusResult<Connection> {
     Connection::system().await
 }
@@ -296,6 +346,21 @@ async fn fetch_fan_mode() -> Option<String> {
     None
 }
 
+async fn fetch_gpu_mode() -> Option<String> {
+    if let Ok(conn) = get_conn().await {
+        if let Ok(proxy) = MuxProxy::new(&conn).await {
+            if let Ok(json_str) = proxy.get_gpu_info().await {
+                if let Ok(val) = serde_json::from_str::<serde_json::Value>(&json_str) {
+                    if let Some(mode) = val.get("mode").and_then(|v| v.as_str()) {
+                        return Some(mode.to_string());
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
 async fn set_power_profile(profile: &str) {
     if let Ok(conn) = get_conn().await {
         if let Ok(proxy) = PowerProxy::new(&conn).await {
@@ -318,6 +383,27 @@ async fn set_fan_mode(mode: &str) {
     }
 }
 
+async fn set_gpu_mode(mode: &str) {
+    if let Ok(conn) = get_conn().await {
+        if let Ok(proxy) = MuxProxy::new(&conn).await {
+            match proxy.set_gpu_mode(mode).await {
+                Ok(resp) => {
+                    info!("GPU modu ayarlandı ({}) -> {}", mode, resp);
+                    if resp.contains("REBOOT") {
+                        let _ = Command::new("notify-send")
+                            .arg("OMEN Space")
+                            .arg("GPU modunun etkin olması için sistemi yeniden başlatmanız gerekiyor.")
+                            .arg("-i")
+                            .arg("dialog-warning")
+                            .spawn();
+                    }
+                },
+                Err(e) => error!("GPU modu değiştirilemedi: {}", e),
+            }
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() {
     let _lock_file = match acquire_single_instance_lock() {
@@ -331,16 +417,20 @@ async fn main() {
     env_logger::init();
     info!("omen-tray başlatılıyor...");
 
+    i18n::init();
+
     RUNTIME
         .set(tokio::runtime::Handle::current())
         .expect("Failed to initialize runtime handle");
 
     let initial_power = fetch_power_profile().await.unwrap_or_else(|| "balanced".into());
     let initial_fan = fetch_fan_mode().await.unwrap_or_else(|| "auto".into());
+    let initial_gpu = fetch_gpu_mode().await.unwrap_or_else(|| "hybrid".into());
 
     let tray = Tray {
         power_profile: initial_power,
         fan_mode: initial_fan,
+        gpu_mode: initial_gpu,
     };
 
     let service = ksni::TrayService::new(tray);
@@ -351,13 +441,17 @@ async fn main() {
         tokio::time::sleep(std::time::Duration::from_secs(3)).await;
         let p = fetch_power_profile().await;
         let f = fetch_fan_mode().await;
-        if p.is_some() || f.is_some() {
+        let g = fetch_gpu_mode().await;
+        if p.is_some() || f.is_some() || g.is_some() {
             handle.update(|tray| {
                 if let Some(new_p) = p {
                     tray.power_profile = new_p;
                 }
                 if let Some(new_f) = f {
                     tray.fan_mode = new_f;
+                }
+                if let Some(new_g) = g {
+                    tray.gpu_mode = new_g;
                 }
             });
         }

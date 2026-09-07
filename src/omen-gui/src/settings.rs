@@ -349,7 +349,7 @@ pub fn build_page(window: &adw::ApplicationWindow, on_lang_changed: Option<Rc<dy
 
     let per_key_wizard_row = adw::ActionRow::builder()
         .title(i18n::t("per_key_wiz_title"))
-        .subtitle("Interactively map all 104 keys to support your keyboard")
+        .subtitle(i18n::t("per_key_wiz_sub"))
         .activatable(true)
         .build();
     per_key_wizard_row.add_suffix(&gtk::Image::builder().icon_name("go-next-symbolic").build());
@@ -373,16 +373,16 @@ pub fn build_page(window: &adw::ApplicationWindow, on_lang_changed: Option<Rc<dy
             
             match res {
                 Ok(report) => {
-                    dialog_clone.set_heading(Some("RGB Issue Report Ready"));
-                    dialog_clone.set_body("Copy this report and submit it to our GitHub issue tracker.");
+                    dialog_clone.set_heading(Some(i18n::t("rgb_issue_ready")));
+                    dialog_clone.set_body(i18n::t("copy_report_gh"));
                     let tv = gtk::TextView::builder().editable(false).wrap_mode(gtk::WrapMode::WordChar).hexpand(true).vexpand(true).build();
                     tv.buffer().set_text(&report);
                     let sw = gtk::ScrolledWindow::builder().child(&tv).min_content_height(300).min_content_width(500).build();
                     dialog_clone.set_extra_child(Some(&sw));
                 },
                 Err(e) => {
-                    dialog_clone.set_heading(Some("Error"));
-                    dialog_clone.set_body(&format!("Failed to generate report: {}", e));
+                    dialog_clone.set_heading(Some(i18n::t("error_generic")));
+                    dialog_clone.set_body(&format!("{}: {}", i18n::t("error_generic"), e));
                 }
             }
             dialog_clone.add_response("ok", i18n::t("btn_close"));
@@ -409,8 +409,8 @@ pub fn build_page(window: &adw::ApplicationWindow, on_lang_changed: Option<Rc<dy
             
             match res {
                 Ok(report) => {
-                    dialog_clone.set_heading(Some("Diagnostic Report"));
-                    dialog_clone.set_body("Your system diagnostic report has been generated.");
+                    dialog_clone.set_heading(Some(i18n::t("diag_report_ready")));
+                    dialog_clone.set_body(i18n::t("diag_report_body"));
                     let tv = gtk::TextView::builder()
                         .editable(false)
                         .wrap_mode(gtk::WrapMode::WordChar)
@@ -422,7 +422,7 @@ pub fn build_page(window: &adw::ApplicationWindow, on_lang_changed: Option<Rc<dy
                     let sw = gtk::ScrolledWindow::builder().child(&tv).min_content_height(400).min_content_width(600).build();
                     dialog_clone.set_extra_child(Some(&sw));
 
-                    dialog_clone.add_response("issue", "Create GitHub Issue");
+                    dialog_clone.add_response("issue", i18n::t("btn_create_gh_issue"));
                     dialog_clone.set_response_appearance("issue", adw::ResponseAppearance::Suggested);
                     let report_clone = report.clone();
                     dialog_clone.connect_response(None, move |d: &adw::MessageDialog, response| {
@@ -435,8 +435,8 @@ pub fn build_page(window: &adw::ApplicationWindow, on_lang_changed: Option<Rc<dy
                     });
                 },
                 Err(e) => {
-                    dialog_clone.set_heading(Some("Error"));
-                    dialog_clone.set_body(&format!("Failed to generate diagnostic report: {}", e));
+                    dialog_clone.set_heading(Some(i18n::t("error_generic")));
+                    dialog_clone.set_body(&format!("{}: {}", i18n::t("error_generic"), e));
                     dialog_clone.connect_response(None, |d: &adw::MessageDialog, _| d.close());
                 }
             }
@@ -494,7 +494,7 @@ pub fn build_page(window: &adw::ApplicationWindow, on_lang_changed: Option<Rc<dy
                     glib::spawn_future_local(async move {
                         let _ = crate::daemon_client::start_per_key_wizard_async().await;
                         let _ = crate::daemon_client::light_key_index_async(1, "#FFFFFF").await;
-                        dialog_c.set_body("Key 1 / 104 is lit. What is it?");
+                        dialog_c.set_body(i18n::t("wiz_key_lit"));
                         dialog_c.set_response_label("next", "Next");
                         entry_c.grab_focus();
                     });
@@ -518,20 +518,20 @@ pub fn build_page(window: &adw::ApplicationWindow, on_lang_changed: Option<Rc<dy
                     
                     if next_idx > 104 {
                         let report = crate::daemon_client::export_keymap_report_async().await.unwrap_or_default();
-                        dialog_c.set_heading(Some("Wizard Complete"));
-                        dialog_c.set_body("Calibration is complete. Please submit this report.");
+                        dialog_c.set_heading(Some(i18n::t("wiz_complete")));
+                        dialog_c.set_body(i18n::t("wiz_complete_body"));
                         
                         let tv = gtk::TextView::builder().editable(false).wrap_mode(gtk::WrapMode::WordChar).hexpand(true).vexpand(true).build();
                         tv.buffer().set_text(&report);
                         let sw = gtk::ScrolledWindow::builder().child(&tv).min_content_height(300).min_content_width(500).build();
                         dialog_c.set_extra_child(Some(&sw));
                         
-                        dialog_c.set_response_label("next", "Create GitHub Issue");
+                        dialog_c.set_response_label("next", i18n::t("btn_create_gh_issue"));
                         return;
                     }
                     
                     let _ = crate::daemon_client::light_key_index_async(next_idx, "#FFFFFF").await;
-                    dialog_c.set_body(&format!("Key {} / 104 is lit. What is it?", next_idx));
+                    dialog_c.set_body(&format!("{} / 104 is lit. What is it?", next_idx));
                     entry_c.grab_focus();
                 });
             }

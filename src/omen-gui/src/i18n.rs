@@ -453,6 +453,18 @@ fn translate_tr(key: &'static str) -> &'static str {
         "zone_single" => "Victus (Tek Bölge)",
         "zone_perkey" => "OMEN (Per-Key RGB)",
 
+        "per_key_wiz_sub" => "Tüm 104 tuşu desteklemek için klavyenizi interaktif olarak haritalayın",
+        "rgb_issue_ready" => "RGB Hata Raporu Hazır",
+        "copy_report_gh" => "Bu raporu kopyalayıp GitHub issue tracker'a gönderin.",
+        "diag_report_ready" => "Tanılama Raporu",
+        "diag_report_body" => "Sistem tanılama raporunuz oluşturuldu.",
+        "btn_create_gh_issue" => "GitHub Issue Oluştur",
+        "error_generic" => "Hata",
+        "wiz_key_lit" => "Tuş 1 / 104 işik veriyor. Hangi tuş?",
+        "wiz_key_lit_n" => "Tuş {} / 104 işik veriyor. Hangi tuş?",
+        "wiz_complete" => "Sihirbaz Tamamlandı",
+        "wiz_complete_body" => "Kalibrasyon tamamlandı. Lütfen bu raporu gönderin.",
+
         // RGB & Lightbar additions
         "kb_global_color" => "Tüm Klavyenin Rengi (Global Color):",
         "lightbar_title" => "4-Segment Lightbar (Ön / Kasa Işık Şeridi)",
@@ -768,6 +780,17 @@ fn translate_en(key: &'static str) -> &'static str {
         "zone_4zone" => "OMEN (4-Zone RGB)",
         "zone_single" => "Victus (Single Zone)",
         "zone_perkey" => "OMEN (Per-Key RGB)",
+
+        "per_key_wiz_sub" => "Interactively map all 104 keys to support your keyboard",
+        "rgb_issue_ready" => "RGB Issue Report Ready",
+        "copy_report_gh" => "Copy this report and submit it to our GitHub issue tracker.",
+        "diag_report_ready" => "Diagnostic Report",
+        "diag_report_body" => "Your system diagnostic report has been generated.",
+        "btn_create_gh_issue" => "Create GitHub Issue",
+        "error_generic" => "Error",
+        "wiz_key_lit" => "Key 1 / 104 is lit. What is it?",
+        "wiz_complete" => "Wizard Complete",
+        "wiz_complete_body" => "Calibration is complete. Please submit this report.",
 
         // RGB & Lightbar additions
         "kb_global_color" => "Global Keyboard Color:",

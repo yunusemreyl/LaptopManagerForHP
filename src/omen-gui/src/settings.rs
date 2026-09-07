@@ -64,9 +64,9 @@ pub fn build_page(window: &adw::ApplicationWindow, on_lang_changed: Option<Rc<dy
 
     let zone_override_model = gtk::StringList::new(&[
         i18n::t("auto_detect_recommended"),
-        "OMEN (4-Zone RGB)",
-        "Victus (Single Zone)",
-        "OMEN (Per-Key RGB)",
+        i18n::t("zone_4zone"),
+        i18n::t("zone_single"),
+        i18n::t("zone_perkey"),
     ]);
     let zone_override_row = adw::ComboRow::builder()
         .title(i18n::t("zone_override"))
@@ -91,9 +91,9 @@ pub fn build_page(window: &adw::ApplicationWindow, on_lang_changed: Option<Rc<dy
         .build();
 
     let appearance_model = gtk::StringList::new(&[
-        "Auto (System Theme)",
-        "Light",
-        "Dark",
+        i18n::t("theme_auto"),
+        i18n::t("theme_light"),
+        i18n::t("theme_dark"),
     ]);
     let appearance_row = adw::ComboRow::builder()
         .title(i18n::t("appearance_mode"))
@@ -118,7 +118,7 @@ pub fn build_page(window: &adw::ApplicationWindow, on_lang_changed: Option<Rc<dy
                 if let Ok(j) = serde_json::from_str::<serde_json::Value>(&js) { json = j; }
             }
             json["appearance_mode"] = serde_json::json!(idx);
-            let _ = std::fs::write(&path, serde_json::to_string_pretty(&json).unwrap());
+            let _ = std::fs::write(&path, serde_json::to_string_pretty(&json).unwrap_or_default());
         }
     });
     app_lang_group.add(&appearance_row);
@@ -305,7 +305,7 @@ pub fn build_page(window: &adw::ApplicationWindow, on_lang_changed: Option<Rc<dy
     fan_clean_row.connect_activated(move |_| {
         let dialog = adw::MessageDialog::builder()
             .heading(i18n::t("fan_cleaning_title"))
-            .body("Running fan dust cleaning routine. Fans will max out for a few seconds...")
+            .body(i18n::t("fan_cleaning_msg"))
             .transient_for(&win_clone_clean)
             .build();
         let spinner = gtk::Spinner::builder().spinning(true).halign(gtk::Align::Center).margin_top(12).margin_bottom(12).build();
@@ -318,7 +318,7 @@ pub fn build_page(window: &adw::ApplicationWindow, on_lang_changed: Option<Rc<dy
             spinner.set_spinning(false);
             dialog_clone.set_heading(Some("Complete"));
             dialog_clone.set_body(&res.unwrap_or_else(|e| format!("Error: {}", e)));
-            dialog_clone.add_response("ok", "Close");
+            dialog_clone.add_response("ok", i18n::t("btn_close"));
             dialog_clone.connect_response(None, |d: &adw::MessageDialog, _| d.close());
         });
     });
@@ -334,21 +334,21 @@ pub fn build_page(window: &adw::ApplicationWindow, on_lang_changed: Option<Rc<dy
         .build();
 
     let rgb_issue_row = adw::ActionRow::builder()
-        .title("Create RGB Per-Key Issue")
-        .subtitle("Generates a diagnostic report if your keyboard RGB is unsupported")
+        .title(i18n::t("rgb_issue_title"))
+        .subtitle(i18n::t("rgb_issue_sub"))
         .activatable(true)
         .build();
     rgb_issue_row.add_suffix(&gtk::Image::builder().icon_name("go-next-symbolic").build());
     
     let dsdt_row = adw::ActionRow::builder()
-        .title("Generate System Diagnostic Report")
-        .subtitle("Extracts EC registers and hardware probe data")
+        .title(i18n::t("diag_report_title"))
+        .subtitle(i18n::t("diag_report_sub"))
         .activatable(true)
         .build();
     dsdt_row.add_suffix(&gtk::Image::builder().icon_name("go-next-symbolic").build());
 
     let per_key_wizard_row = adw::ActionRow::builder()
-        .title("RGB Per-Key Calibration Wizard")
+        .title(i18n::t("per_key_wiz_title"))
         .subtitle("Interactively map all 104 keys to support your keyboard")
         .activatable(true)
         .build();
@@ -358,8 +358,8 @@ pub fn build_page(window: &adw::ApplicationWindow, on_lang_changed: Option<Rc<dy
     let win_clone1 = window.clone();
     rgb_issue_row.connect_activated(move |_| {
         let dialog = adw::MessageDialog::builder()
-            .heading("Generating RGB Issue Report")
-            .body("Please wait while we gather your hardware footprint...")
+            .heading(i18n::t("gen_rgb_issue"))
+            .body(i18n::t("wait_hw_footprint"))
             .transient_for(&win_clone1)
             .build();
         let spinner = gtk::Spinner::builder().spinning(true).halign(gtk::Align::Center).margin_top(12).margin_bottom(12).build();
@@ -385,7 +385,7 @@ pub fn build_page(window: &adw::ApplicationWindow, on_lang_changed: Option<Rc<dy
                     dialog_clone.set_body(&format!("Failed to generate report: {}", e));
                 }
             }
-            dialog_clone.add_response("ok", "Close");
+            dialog_clone.add_response("ok", i18n::t("btn_close"));
             dialog_clone.set_default_response(Some("ok"));
             dialog_clone.set_close_response("ok");
         });
@@ -394,8 +394,8 @@ pub fn build_page(window: &adw::ApplicationWindow, on_lang_changed: Option<Rc<dy
     let win_clone2 = window.clone();
     dsdt_row.connect_activated(move |_| {
         let dialog = adw::MessageDialog::builder()
-            .heading("Diagnostic Scan Running")
-            .body("Scanning WMI endpoints and Embedded Controller (EC) memory registers. This might take a few seconds...")
+            .heading(i18n::t("diag_scan_running"))
+            .body(i18n::t("scan_wmi_endpoints"))
             .transient_for(&win_clone2)
             .build();
         let spinner = gtk::Spinner::builder().spinning(true).halign(gtk::Align::Center).margin_top(12).margin_bottom(12).build();
@@ -440,28 +440,28 @@ pub fn build_page(window: &adw::ApplicationWindow, on_lang_changed: Option<Rc<dy
                     dialog_clone.connect_response(None, |d: &adw::MessageDialog, _| d.close());
                 }
             }
-            dialog_clone.add_response("ok", "Close");
+            dialog_clone.add_response("ok", i18n::t("btn_close"));
         });
     });
 
     let win_clone3 = window.clone();
     per_key_wizard_row.connect_activated(move |_| {
         let dialog = adw::MessageDialog::builder()
-            .heading("RGB Per-Key Wizard")
+            .heading(i18n::t("per_key_wiz_title"))
             .body("We will light up each of the 104 keys one by one.\nPlease type the name of the key that is currently lit (e.g. 'W', 'Esc', 'Space').")
             .transient_for(&win_clone3)
             .build();
             
         let entry = gtk::Entry::builder()
-            .placeholder_text("Key name...")
+            .placeholder_text(i18n::t("wiz_key_name_ph"))
             .hexpand(true)
             .margin_top(12)
             .build();
             
         dialog.set_extra_child(Some(&entry));
         
-        dialog.add_response("cancel", "Cancel");
-        dialog.add_response("next", "Start & Next");
+        dialog.add_response("cancel", i18n::t("btn_cancel"));
+        dialog.add_response("next", i18n::t("btn_start_next"));
         dialog.set_response_appearance("next", adw::ResponseAppearance::Suggested);
         
         let current_index = std::rc::Rc::new(std::cell::RefCell::new(0u32));

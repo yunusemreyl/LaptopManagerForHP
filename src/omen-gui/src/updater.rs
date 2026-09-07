@@ -161,7 +161,7 @@ fn show_firmware_update_modal(window: &adw::ApplicationWindow) {
 
 fn show_app_update_modal(window: &adw::ApplicationWindow) {
     let dialog = gtk::Window::builder()
-        .title("OMENSpace Updater")
+        .title(i18n::t("title_updater"))
         .transient_for(window)
         .modal(true)
         .default_width(700)

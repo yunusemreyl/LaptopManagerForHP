@@ -205,7 +205,7 @@ pub fn get_hardware_specs() -> HardwareSpecs {
         };
 
         // 3. GPU info
-        let mut gpu_str = String::from("NVIDIA GeForce RTX GPU");
+        let mut gpu_str = String::from("Unknown GPU");
         if let Ok(output) = Command::new("nvidia-smi")
             .args(["--query-gpu=name,memory.total", "--format=csv,noheader,nounits"])
             .output()
@@ -216,7 +216,7 @@ pub fn get_hardware_specs() -> HardwareSpecs {
                 let name = parts[0].trim();
                 if let Ok(mb) = parts[1].trim().parse::<f64>() {
                     let gb = (mb / 1024.0).round() as i32;
-                    gpu_str = format!("{}  ·  {} GB GDDR6", name, gb);
+                    gpu_str = format!("{}  ·  {} GB VRAM", name, gb);
                 } else {
                     gpu_str = name.to_string();
                 }
@@ -302,9 +302,9 @@ pub fn get_hardware_specs() -> HardwareSpecs {
             .output()
         {
             let vbios = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            specs.vbios_version = if !vbios.is_empty() { vbios } else { "95.07.28.00.56".to_string() };
+            specs.vbios_version = if !vbios.is_empty() { vbios } else { "Unknown".to_string() };
         } else {
-            specs.vbios_version = "95.07.28.00.56".to_string();
+            specs.vbios_version = "Unknown".to_string();
         }
 
         // 9. NVIDIA Driver Version

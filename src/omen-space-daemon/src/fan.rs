@@ -651,12 +651,6 @@ impl FanService {
     ///   auto/custom/performance → pwm1_enable=1 (manual), duty set by monitor loop or manual target
     ///   max  → platform_profile=performance, pwm1_enable=0 (full speed)
     async fn set_mode_internal(state: &mut FanState, mode: &str) -> bool {
-        // Determine ACPI platform profile
-        let acpi_profile = match mode {
-            "max" | "performance" => "performance",
-            _ => "balanced",
-        };
-
         // Determine pwm1_enable value (OmenCore mapping)
         let pwm_enable_val = match mode {
             "ec" => 2,       // BIOS hardware control
@@ -671,35 +665,7 @@ impl FanService {
             });
         }
 
-        // Step 1: Write ACPI platform profile FIRST (OmenCore order)
-        // Both underscore and hyphen variants — different kernel/driver combos use different names
-        let acpi_paths = [
-            "/sys/firmware/acpi/platform_profile",
-            "/sys/devices/platform/hp-wmi/platform_profile",
-            "/sys/devices/platform/hp-wmi/platform-profile",
-        ];
-        for p in acpi_paths {
-            if sysfs_exists(p).await {
-                sysfs_write(p, acpi_profile).await;
-                info!("Set platform_profile={} via {}", acpi_profile, p);
-            }
-        }
-
-        // Also try hp-wmi thermal_profile (older interface, both naming styles)
-        let thermal_paths = [
-            "/sys/devices/platform/hp-wmi/thermal_profile",
-            "/sys/devices/platform/hp-wmi/thermal-profile",
-            "/sys/devices/platform/hp-omen/thermal_profile",
-            "/sys/devices/platform/hp-omen/thermal-profile",
-        ];
-        let thermal_str = if mode == "max" || mode == "performance" { "1" } else { "0" };
-        for p in thermal_paths {
-            if sysfs_exists(p).await {
-                sysfs_write(p, thermal_str).await;
-            }
-        }
-        
-        // Step 2: Write pwm1_enable
+        // Step 1: Write pwm1_enable
         let mut ok = false;
         if let Some(ref hwmon) = state.hwmon_path {
             ok = sysfs_write(hwmon.join("pwm1_enable"), pwm_enable_val.to_string()).await;

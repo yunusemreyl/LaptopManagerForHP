@@ -16,6 +16,7 @@ pub fn build_page(window: &adw::ApplicationWindow, on_lang_changed: Option<Rc<dy
     let mut init_thermal_alerts = true;
     let mut init_zone_override = 0u32;
     let mut init_appearance_mode = 0u32;
+    let mut init_lightbar = true;
 
     if let Ok(home) = std::env::var("HOME") {
         let path = format!("{}/.config/omenspace/settings.json", home);
@@ -28,6 +29,7 @@ pub fn build_page(window: &adw::ApplicationWindow, on_lang_changed: Option<Rc<dy
                 if let Some(ta) = json.get("thermal_alerts").and_then(|v| v.as_bool()) { init_thermal_alerts = ta; }
                 if let Some(zo) = json.get("zone_override").and_then(|v| v.as_u64()) { init_zone_override = zo as u32; }
                 if let Some(am) = json.get("appearance_mode").and_then(|v| v.as_u64()) { init_appearance_mode = am as u32; }
+                if let Some(lb) = json.get("lightbar_enabled").and_then(|v| v.as_bool()) { init_lightbar = lb; }
             }
         }
     }
@@ -73,6 +75,14 @@ pub fn build_page(window: &adw::ApplicationWindow, on_lang_changed: Option<Rc<dy
         .selected(init_zone_override)
         .build();
     hw_group.add(&zone_override_row);
+
+    let lightbar_row = adw::SwitchRow::builder()
+        .title(i18n::t("lightbar_wmi_toggle"))
+        .subtitle(i18n::t("lightbar_wmi_toggle_sub"))
+        .build();
+    lightbar_row.set_active(init_lightbar);
+    hw_group.add(&lightbar_row);
+
     page.append(&hw_group);
 
     // ── Appearance & Language group ───────────────────────────
@@ -219,6 +229,7 @@ pub fn build_page(window: &adw::ApplicationWindow, on_lang_changed: Option<Rc<dy
     let bat_row_clone = battery_row.clone();
     let thm_row_clone = thermal_row.clone();
     let zone_row_clone = zone_override_row.clone();
+    let lb_row_clone = lightbar_row.clone();
 
     let save_settings = move || {
         let hb = hb_spin_clone.value();
@@ -227,6 +238,7 @@ pub fn build_page(window: &adw::ApplicationWindow, on_lang_changed: Option<Rc<dy
         let bc = bat_row_clone.is_active();
         let ta = thm_row_clone.is_active();
         let zo = zone_row_clone.selected();
+        let lb = lb_row_clone.is_active();
         if let Ok(home) = std::env::var("HOME") {
             let dir = format!("{}/.config/omenspace", home);
             let _ = std::fs::create_dir_all(&dir);
@@ -237,7 +249,8 @@ pub fn build_page(window: &adw::ApplicationWindow, on_lang_changed: Option<Rc<dy
                 "startup_profile": sp,
                 "battery_care": bc,
                 "thermal_alerts": ta,
-                "zone_override": zo
+                "zone_override": zo,
+                "lightbar_enabled": lb
             });
             let _ = std::fs::write(path, serde_json::to_string_pretty(&json).unwrap_or_default());
         }
@@ -268,7 +281,50 @@ pub fn build_page(window: &adw::ApplicationWindow, on_lang_changed: Option<Rc<dy
     let s6 = save_settings_rc.clone();
     zone_override_row.connect_selected_notify(move |_| s6());
     
+    let s7 = save_settings_rc.clone();
+    lightbar_row.connect_active_notify(move |r| {
+        s7();
+        crate::daemon_client::set_global_sync(r.is_active(), 100, "ltr");
+    });
+    
     page.append(&perf_group);
+
+    // ── Fan Control group ─────────────────────────────────────
+    let fan_control_group = adw::PreferencesGroup::builder()
+        .title(i18n::t("fan_control_group"))
+        .build();
+
+    let fan_clean_row = adw::ActionRow::builder()
+        .title(i18n::t("fan_cleaning_title"))
+        .subtitle(i18n::t("fan_cleaning_sub"))
+        .activatable(true)
+        .build();
+    fan_clean_row.add_suffix(&gtk::Image::builder().icon_name("weather-storm-symbolic").build());
+    
+    let win_clone_clean = window.clone();
+    fan_clean_row.connect_activated(move |_| {
+        let dialog = adw::MessageDialog::builder()
+            .heading(i18n::t("fan_cleaning_title"))
+            .body("Running fan dust cleaning routine. Fans will max out for a few seconds...")
+            .transient_for(&win_clone_clean)
+            .build();
+        let spinner = gtk::Spinner::builder().spinning(true).halign(gtk::Align::Center).margin_top(12).margin_bottom(12).build();
+        dialog.set_extra_child(Some(&spinner));
+        dialog.present();
+        
+        let dialog_clone = dialog.clone();
+        glib::spawn_future_local(async move {
+            let res = crate::daemon_client::run_fan_cleaning_async().await;
+            spinner.set_spinning(false);
+            dialog_clone.set_heading(Some("Complete"));
+            dialog_clone.set_body(&res.unwrap_or_else(|e| format!("Error: {}", e)));
+            dialog_clone.add_response("ok", "Close");
+            dialog_clone.connect_response(None, |d: &adw::MessageDialog, _| d.close());
+        });
+    });
+    
+    fan_control_group.add(&fan_clean_row);
+    page.append(&fan_control_group);
 
 
     // ── Troubleshooting & Diagnostics group ─────────────────────

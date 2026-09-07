@@ -427,6 +427,11 @@ fn translate_tr(key: &'static str) -> &'static str {
         "troubleshooting_group" => "Hata Ayıklama & Tanılama",
         "troubleshooting_desc" => "Desteklenmeyen cihazlar için donanım raporu ve GitHub Issue oluşturucu.",
 
+        "fan_cleaning_title" => "Fan Temizliği (Dust Cleaning)",
+        "fan_cleaning_sub" => "Tozları temizlemek için fanları kısa süreliğine tam güçte çalıştırır",
+        "lightbar_wmi_toggle" => "Lightbar Gücü",
+        "lightbar_wmi_toggle_sub" => "Kasa ışık şeridini (Lightbar) tamamen açıp kapatır",
+
         // RGB & Lightbar additions
         "kb_global_color" => "Tüm Klavyenin Rengi (Global Color):",
         "lightbar_title" => "4-Segment Lightbar (Ön / Kasa Işık Şeridi)",
@@ -716,6 +721,11 @@ fn translate_en(key: &'static str) -> &'static str {
         "seconds_abbr" => "s",
         "troubleshooting_group" => "Troubleshooting & Diagnostics",
         "troubleshooting_desc" => "Hardware reporter and GitHub Issue generator for unsupported devices.",
+
+        "fan_cleaning_title" => "Fan Dust Cleaning",
+        "fan_cleaning_sub" => "Run fans at maximum speed for a few seconds to clear out dust",
+        "lightbar_wmi_toggle" => "Lightbar Power",
+        "lightbar_wmi_toggle_sub" => "Completely turn the chassis lightbar on or off",
 
         // RGB & Lightbar additions
         "kb_global_color" => "Global Keyboard Color:",

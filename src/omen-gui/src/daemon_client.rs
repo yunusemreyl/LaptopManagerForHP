@@ -113,6 +113,7 @@ trait Rgb {
 )]
 trait Platform {
     async fn set_battery_care(&self, limit: u32) -> zbus::Result<String>;
+    async fn run_fan_cleaning(&self) -> zbus::Result<String>;
 }
 
 // ── Mux Service Proxy ────────────────────────────────────────────────────────
@@ -296,6 +297,13 @@ pub fn set_global_sync(power_val: bool, brightness_val: i32, direction_str: &str
             }
         }
     });
+}
+
+pub async fn run_fan_cleaning_async() -> Result<String, Box<dyn std::error::Error>> {
+    let conn = get_conn().await?;
+    let proxy = PlatformProxy::new(&conn).await?;
+    let result = proxy.run_fan_cleaning().await?;
+    Ok(result)
 }
 
 #[allow(dead_code)]

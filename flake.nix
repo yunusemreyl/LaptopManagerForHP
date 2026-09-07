@@ -13,16 +13,18 @@
       in
       {
         packages = {
-          omen-space = pkgs.stdenv.mkDerivation {
+          omen-space = pkgs.rustPlatform.buildRustPackage {
             pname = "omen-space";
             version = "2.0.1";
 
             src = ./.;
 
+            cargoLock = {
+              lockFile = ./Cargo.lock;
+            };
+
             nativeBuildInputs = with pkgs; [
               pkg-config
-              cargo
-              rustc
             ];
 
             buildInputs = with pkgs; [
@@ -103,6 +105,9 @@
                   "KDIR=${kernel.dev}/lib/modules/${kernel.modDirVersion}/build"
                   "INSTALL_MOD_PATH=$(out)"
                 ];
+                installPhase = ''
+                  make -C ${kernel.dev}/lib/modules/${kernel.modDirVersion}/build M=$(pwd) INSTALL_MOD_PATH=$out modules_install
+                '';
               }) { kernel = config.boot.kernelPackages.kernel; })
             ];
           };

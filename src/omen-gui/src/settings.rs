@@ -372,7 +372,7 @@ pub fn build_page(window: &adw::ApplicationWindow, on_lang_changed: Option<Rc<dy
                     dialog_clone.connect_response(None, move |d: &adw::MessageDialog, response| {
                         if response == "issue" {
                             use urlencoding::encode;
-                            let url = format!("https://github.com/yunusemreyl/OmenCtl/issues/new?title=Diagnostic+Report&body={}", encode(&report_clone));
+                            let url = format!("https://github.com/yunusemreyl/omen-space/issues/new?title=Diagnostic+Report&body={}", encode(&report_clone));
                             let _ = gtk::gio::AppInfo::launch_default_for_uri(&url, None::<&gtk::gio::AppLaunchContext>);
                         }
                         d.close();
@@ -418,14 +418,16 @@ pub fn build_page(window: &adw::ApplicationWindow, on_lang_changed: Option<Rc<dy
             if response == "next" {
                 let mut idx = current_index.borrow_mut();
                 if *idx == 105 {
-                    let tv = d.extra_child().unwrap().downcast::<gtk::ScrolledWindow>().unwrap();
-                    let text_view = tv.child().unwrap().downcast::<gtk::TextView>().unwrap();
-                    let buf = text_view.buffer();
-                    let report = buf.text(&buf.start_iter(), &buf.end_iter(), false).to_string();
-                    
-                    use urlencoding::encode;
-                    let url = format!("https://github.com/yunusemreyl/OmenCtl/issues/new?title=Per-Key+Mapping+Data&body={}", encode(&report));
-                    let _ = gtk::gio::AppInfo::launch_default_for_uri(&url, None::<&gtk::gio::AppLaunchContext>);
+                    if let Some(tv) = d.extra_child().and_then(|c| c.downcast::<gtk::ScrolledWindow>().ok()) {
+                        if let Some(text_view) = tv.child().and_then(|c| c.downcast::<gtk::TextView>().ok()) {
+                            let buf = text_view.buffer();
+                            let report = buf.text(&buf.start_iter(), &buf.end_iter(), false).to_string();
+                            
+                            use urlencoding::encode;
+                            let url = format!("https://github.com/yunusemreyl/omen-space/issues/new?title=Per-Key+Mapping+Data&body={}", encode(&report));
+                            let _ = gtk::gio::AppInfo::launch_default_for_uri(&url, None::<&gtk::gio::AppLaunchContext>);
+                        }
+                    }
                     d.close();
                     return;
                 }

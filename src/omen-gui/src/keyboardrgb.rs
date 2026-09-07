@@ -166,7 +166,7 @@ fn build_interactive_keyboard(
     let global_color_box = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(12).margin_top(8).margin_bottom(12).halign(gtk::Align::Center).build();
     let global_color_label = gtk::Label::builder().label(i18n::t("kb_global_color")).css_classes(["dim-label"]).build();
     if global_color_label.label().is_empty() || global_color_label.label() == "kb_global_color" {
-        global_color_label.set_label("Tüm Klavyenin Rengi (Global Color):");
+        global_color_label.set_label(i18n::t("kb_global_color"));
     }
     let global_color_btn = gtk::Button::builder().width_request(40).height_request(24).build();
     global_color_btn.add_css_class("circular");
@@ -353,7 +353,7 @@ fn build_interactive_keyboard(
 }
 
 // ── OmenCore 4-Segment Lightbar Widget Builder ───────────────
-fn build_interactive_lightbar() -> gtk::Box {
+fn build_interactive_lightbar(state_json_opt: &Option<serde_json::Value>) -> gtk::Box {
     let bar_card = gtk::Box::builder()
         .orientation(gtk::Orientation::Vertical)
         .css_classes(["os-card"])
@@ -365,14 +365,14 @@ fn build_interactive_lightbar() -> gtk::Box {
         .spacing(8)
         .build();
     title_row.append(&gtk::Label::builder()
-        .label("4-Segment Lightbar (Ön / Kasa Işık Şeridi)")
+        .label(i18n::t("lightbar_title"))
         .css_classes(["chip-title"])
         .hexpand(true)
         .halign(gtk::Align::Start)
         .build());
 
     let sync_btn = gtk::Button::builder()
-        .label("Tüm Segmentleri Boya")
+        .label(i18n::t("lightbar_sync_btn"))
         .css_classes(["ec-btn"])
         .build();
     title_row.append(&sync_btn);
@@ -387,7 +387,7 @@ fn build_interactive_lightbar() -> gtk::Box {
         .margin_bottom(4)
         .build();
 
-    let segment_names = ["Bölge 1 (Sol)", "Bölge 2 (Orta-Sol)", "Bölge 3 (Orta-Sağ)", "Bölge 4 (Sağ)"];
+    let segment_names = [i18n::t("lb_seg_1"), i18n::t("lb_seg_2"), i18n::t("lb_seg_3"), i18n::t("lb_seg_4")];
     let default_colors = ["#E03454", "#0099EE", "#0099EE", "#E03454"]; // OMEN gradient
     let mut segment_buttons = Vec::new();
 
@@ -395,7 +395,18 @@ fn build_interactive_lightbar() -> gtk::Box {
     if let Some(display) = gtk::gdk::Display::default() {
         gtk::style_context_add_provider_for_display(&display, &*dyn_provider, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
     }
-    let colors_map = Rc::new(RefCell::new(default_colors.iter().map(|s| s.to_string()).collect::<Vec<_>>()));
+    let mut initial_colors = default_colors.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+    if let Some(state) = state_json_opt {
+        if let Some(zones) = state.get("zones").and_then(|z| z.as_object()) {
+            for i in 0..4 {
+                let key = format!("{}", i + 4); // Lightbar zones are 4, 5, 6, 7
+                if let Some(hex) = zones.get(&key).and_then(|h| h.as_str()) {
+                    initial_colors[i] = hex.to_string();
+                }
+            }
+        }
+    }
+    let colors_map = Rc::new(RefCell::new(initial_colors));
 
     for (i, name) in segment_names.iter().enumerate() {
         let seg_btn = gtk::Button::builder()
@@ -502,7 +513,7 @@ pub fn build_page() -> adw::PreferencesPage {
     let std_group = adw::PreferencesGroup::builder()
         .title(i18n::t("kb_lighting_group"))
         .description(if is_per_key {
-            "Per-Key RGB Klavye" // Hardcoded fallback for now, or could use i18n
+            i18n::t("omen_per_key_desc")
         } else if is_omen {
             i18n::t("omen_4zone_desc")
         } else {
@@ -541,8 +552,8 @@ pub fn build_page() -> adw::PreferencesPage {
                 i18n::t("effect_breathing"), 
                 i18n::t("effect_blinking"), 
                 i18n::t("effect_cycle"), 
-                "Dalga (Soldan Sağa)", 
-                "Dalga (Sağdan Sola)"
+                i18n::t("effect_wave_ltr"), 
+                i18n::t("effect_wave_rtl")
             ],
             vec!["static", "breathing", "blinking", "cycle", "wave_ltr", "wave_rtl"]
         ),
@@ -554,11 +565,11 @@ pub fn build_page() -> adw::PreferencesPage {
                 i18n::t("effect_blinking"),
                 i18n::t("effect_cycle"),
                 i18n::t("effect_wave"),
-                "Starlight / Yıldız Işığı",
-                "Marquee / Spiral",
-                "Reactive (Tepkisel)",
-                "Ripple (Dalgalanma)",
-                "Raindrop (Yağmur)"
+                i18n::t("effect_starlight"),
+                i18n::t("effect_marquee"),
+                i18n::t("effect_reactive"),
+                i18n::t("effect_ripple"),
+                i18n::t("effect_raindrop")
             ],
             vec!["static", "per_key_custom", "breathing", "blinking", "cycle", "wave", "starlight", "marquee", "reactive", "ripple", "raindrop"]
         ),
@@ -721,6 +732,10 @@ pub fn build_page() -> adw::PreferencesPage {
             .subtitle(i18n::t("lightbar_enable_sub"))
             .build();
         lb_enable_row.set_active(true);
+        lb_enable_row.connect_active_notify(move |row| {
+            let is_active = row.is_active();
+            crate::daemon_client::set_global_sync(is_active, 100, "ltr");
+        });
         lb_group.add(&lb_enable_row);
 
         let lb_effect_model = gtk::StringList::new(&[
@@ -733,6 +748,15 @@ pub fn build_page() -> adw::PreferencesPage {
             .title(i18n::t("lightbar_effect"))
             .model(&lb_effect_model)
             .build();
+        lb_effect_row.connect_selected_notify(move |row| {
+            let mode = match row.selected() {
+                1 => "wave",
+                2 => "breathing",
+                3 => "cycle",
+                _ => "static",
+            };
+            crate::daemon_client::set_mode_sync(mode, 50);
+        });
         lb_group.add(&lb_effect_row);
 
         let lb_bright_row = adw::ActionRow::builder().title(i18n::t("lightbar_brightness")).build();
@@ -760,7 +784,7 @@ pub fn build_page() -> adw::PreferencesPage {
         let lb_preview_group = adw::PreferencesGroup::builder()
             .title(i18n::t("lightbar_segments"))
             .build();
-        let lb_widget = build_interactive_lightbar();
+        let lb_widget = build_interactive_lightbar(&state_json_opt);
         lb_preview_group.add(&lb_widget);
         page.add(&lb_preview_group);
     }

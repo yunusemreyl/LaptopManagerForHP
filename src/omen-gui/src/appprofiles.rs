@@ -40,12 +40,39 @@ pub fn build_page(window: &adw::ApplicationWindow) -> gtk::Box {
     page.append(&hdr);
 
     // ── Enable switch ─────────────────────────────────────────
+    let mut init_enabled = true;
+    if let Ok(home) = std::env::var("HOME") {
+        let path = format!("{}/.config/omenspace/settings.json", home);
+        if let Ok(js) = std::fs::read_to_string(&path) {
+            if let Ok(j) = serde_json::from_str::<serde_json::Value>(&js) {
+                if let Some(en) = j.get("app_profiles_enabled").and_then(|v| v.as_bool()) {
+                    init_enabled = en;
+                }
+            }
+        }
+    }
+
     let enable_group = adw::PreferencesGroup::builder().build();
     let enable_row = adw::SwitchRow::builder()
         .title(i18n::t("enable_profiles"))
         .subtitle(i18n::t("enable_profiles_sub"))
+        .active(init_enabled)
         .build();
-    enable_row.set_active(true);
+    
+    enable_row.connect_active_notify(|row| {
+        let is_active = row.is_active();
+        if let Ok(home) = std::env::var("HOME") {
+            let path = format!("{}/.config/omenspace/settings.json", home);
+            let mut json = serde_json::json!({});
+            if let Ok(js) = std::fs::read_to_string(&path) {
+                if let Ok(j) = serde_json::from_str::<serde_json::Value>(&js) { json = j; }
+            }
+            json["app_profiles_enabled"] = serde_json::json!(is_active);
+            let _ = std::fs::write(&path, serde_json::to_string_pretty(&json).unwrap_or_default());
+        }
+        crate::daemon_client::set_app_profiles_enabled_sync(is_active);
+    });
+
     enable_group.add(&enable_row);
     page.append(&enable_group);
 
@@ -317,7 +344,15 @@ fn show_app_picker_modal(parent_window: &impl IsA<gtk::Window>, target_entry: &g
         let text = search_clone.text().to_string().to_lowercase();
         if text.is_empty() { return true; }
         
-        let action_row = row.child().unwrap().downcast::<adw::ActionRow>().unwrap();
+        let action_row = if let Some(child) = row.child() {
+            if let Ok(ar) = child.downcast::<adw::ActionRow>() {
+                ar
+            } else {
+                return false;
+            }
+        } else {
+            return false;
+        };
         let title = action_row.title().to_lowercase();
         let sub = action_row.subtitle().unwrap_or_default().to_lowercase();
         title.contains(&text) || sub.contains(&text)

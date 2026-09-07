@@ -379,9 +379,15 @@ pub fn build_spec_header() -> gtk::Box {
         .spacing(16)
         .build();
 
+    let img_name = if specs.product_name.to_lowercase().contains("omen") {
+        "omen_laptop.png"
+    } else {
+        "victus_laptop.png"
+    };
+
     // Device image
     card.append(&gtk::Image::builder()
-        .file(&crate::asset_resolver::get_asset_path("victus_laptop.png"))
+        .file(&crate::asset_resolver::get_asset_path(img_name))
         .pixel_size(80)
         .valign(gtk::Align::Center)
         .build());
@@ -435,8 +441,36 @@ pub fn build_page(is_general: bool) -> gtk::Box {
         .spacing(10)
         .build();
 
-    let cpu_max_watt = 65.0_f64;   // i5-13500H TDP
-    let gpu_max_watt = 80.0_f64;   // RTX 4050 Mobile
+    let specs = crate::daemon_client::get_hardware_specs_sync();
+    let cpu_lower = specs.cpu_spec.to_lowercase();
+    let cpu_max_watt = if cpu_lower.contains("i9") || cpu_lower.contains("hx") {
+        157.0_f64
+    } else if cpu_lower.contains("i7") {
+        115.0_f64
+    } else if cpu_lower.contains("ryzen 9") || cpu_lower.contains("ryzen 7") {
+        85.0_f64
+    } else {
+        65.0_f64
+    };
+
+    let gpu_lower = specs.gpu_spec.to_lowercase();
+    let gpu_max_watt = if gpu_lower.contains("4090") {
+        175.0_f64
+    } else if gpu_lower.contains("4080") {
+        175.0_f64
+    } else if gpu_lower.contains("4070") {
+        140.0_f64
+    } else if gpu_lower.contains("4060") {
+        120.0_f64
+    } else if gpu_lower.contains("3080") || gpu_lower.contains("3070") {
+        140.0_f64
+    } else if gpu_lower.contains("3060") {
+        115.0_f64
+    } else if gpu_lower.contains("radeon") {
+        120.0_f64
+    } else {
+        80.0_f64
+    };
 
     let cpu_watt_ui = build_watt_graph_card(i18n::t("cpu_wattage"), cpu_max_watt);
     let gpu_watt_ui = build_watt_graph_card(i18n::t("gpu_wattage"), gpu_max_watt);
@@ -516,7 +550,7 @@ pub fn build_page(is_general: bool) -> gtk::Box {
         cpu_ui.load_bar.set_fraction(stats.cpu_load);
         cpu_ui.load_pct_label.set_label(&format!("{}%", (stats.cpu_load * 100.0) as i32));
         cpu_ui.pwr_label.set_label(&format!("{:.1}W", stats.cpu_pwr));
-        cpu_ui.fan_label.set_label(&format!("{} RPM", stats.fan_rpm));
+        cpu_ui.fan_label.set_label(&format!("{} RPM", if stats.fan1_rpm > 0 { stats.fan1_rpm } else { stats.fan_rpm }));
 
         gpu_ui.temp_label.set_label(&format!("{}°C", g_avg));
         gpu_ui.load_bar.set_fraction(stats.gpu_load);
@@ -526,7 +560,7 @@ pub fn build_page(is_general: bool) -> gtk::Box {
         } else {
             gpu_ui.pwr_label.set_label(&format!("{:.1}W", stats.gpu_pwr));
         }
-        gpu_ui.fan_label.set_label(&format!("{} RPM", stats.fan_rpm));
+        gpu_ui.fan_label.set_label(&format!("{} RPM", if stats.fan2_rpm > 0 { stats.fan2_rpm } else { stats.fan_rpm }));
 
         dev_ui.ram_bar.set_fraction(stats.ram_frac);
         dev_ui.ram_val_label.set_label(

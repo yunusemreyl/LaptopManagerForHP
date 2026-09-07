@@ -9,6 +9,8 @@ pub struct SystemStats {
     pub cpu_load: f64,
     pub cpu_pwr: f64,
     pub fan_rpm: i32,
+    pub fan1_rpm: i32,
+    pub fan2_rpm: i32,
     pub gpu_temp: i32,
     pub gpu_load: f64,
     pub gpu_pwr: f64,
@@ -31,6 +33,7 @@ pub struct HardwareSpecs {
     pub ssd_spec: String,
     pub os_spec: String,
     pub bios_version: String,
+    pub ec_version: String,
     pub vbios_version: String,
     pub nvidia_driver: String,
     pub kernel_version: String,
@@ -47,6 +50,7 @@ trait Power {
     async fn set_power_profile(&self, profile: &str) -> zbus::Result<String>;
     async fn get_power_profile(&self) -> zbus::Result<String>;
     async fn set_power_limits(&self, enabled: bool, pl1: i32, pl2: i32) -> zbus::Result<String>;
+    async fn set_app_profiles_enabled(&self, enabled: bool) -> zbus::Result<String>;
 }
 
 // ── Fan Service Proxy ─────────────────────────────────────────────────────────
@@ -175,7 +179,6 @@ async fn get_conn() -> Result<zbus::Connection, zbus::Error> {
 // ── Synchronous Wrappers for UI Callbacks ────────────────────────────────────
 
 pub fn set_power_profile_sync(profile: String) {
-    println!("DEBUG: set_power_profile_sync called with profile: {}", profile);
     let rt = get_runtime();
     rt.spawn(async move {
         if let Ok(conn) = get_conn().await {
@@ -189,7 +192,6 @@ pub fn set_power_profile_sync(profile: String) {
 }
 
 pub fn set_fan_mode_sync(mode: String) {
-    println!("DEBUG: set_fan_mode_sync called with mode: {}", mode);
     let rt = get_runtime();
     rt.spawn(async move {
         if let Ok(conn) = get_conn().await {
@@ -210,6 +212,17 @@ pub fn set_thermal_protection_sync(enabled: bool) {
                 if let Err(e) = proxy.set_thermal_protection(enabled).await {
                     eprintln!("D-Bus call failed: {}", e);
                 }
+            }
+        }
+    });
+}
+
+pub fn set_app_profiles_enabled_sync(enabled: bool) {
+    let rt = get_runtime();
+    rt.spawn(async move {
+        if let Ok(conn) = get_conn().await {
+            if let Ok(proxy) = PowerProxy::new(&conn).await {
+                let _ = proxy.set_app_profiles_enabled(enabled).await;
             }
         }
     });
@@ -302,6 +315,9 @@ pub fn get_diagnostics_sync() -> SystemStats {
     serde_json::from_str(&json_str).unwrap_or_default()
 }
 
+static TELEMETRY_SENDERS: OnceLock<std::sync::Mutex<Vec<glib::Sender<SystemStats>>>> = OnceLock::new();
+static TELEMETRY_STARTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 #[allow(deprecated)]
 pub fn subscribe_telemetry<F>(mut callback: F)
 where
@@ -313,26 +329,36 @@ where
         glib::ControlFlow::Continue
     });
 
-    let rt = get_runtime();
-    rt.spawn(async move {
-        if let Ok(conn) = get_conn().await {
-            if let Ok(proxy) = SysMonProxy::new(&conn).await {
-                if let Ok(mut stream) = proxy.receive_telemetry_updated().await {
-                    use zbus::export::futures_util::StreamExt;
-                    while let Some(signal) = stream.next().await {
-                        if let Ok(args) = signal.args() {
-                            let json_str = args.json_stats();
-                            if let Ok(stats) = serde_json::from_str::<SystemStats>(json_str) {
-                                let _ = tx.send(stats);
-                            } else {
-                                eprintln!("Telemetry parse error. JSON: {}", json_str);
+    let senders = TELEMETRY_SENDERS.get_or_init(|| std::sync::Mutex::new(Vec::new()));
+    senders.lock().unwrap().push(tx);
+
+    if !TELEMETRY_STARTED.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        let rt = get_runtime();
+        rt.spawn(async move {
+            if let Ok(conn) = get_conn().await {
+                if let Ok(proxy) = SysMonProxy::new(&conn).await {
+                    if let Ok(mut stream) = proxy.receive_telemetry_updated().await {
+                        use zbus::export::futures_util::StreamExt;
+                        while let Some(signal) = stream.next().await {
+                            if let Ok(args) = signal.args() {
+                                let json_str = args.json_stats();
+                                if let Ok(stats) = serde_json::from_str::<SystemStats>(json_str) {
+                                    if let Some(mutex) = TELEMETRY_SENDERS.get() {
+                                        let senders = mutex.lock().unwrap();
+                                        for tx in senders.iter() {
+                                            let _ = tx.send(stats.clone());
+                                        }
+                                    }
+                                } else {
+                                    eprintln!("Telemetry parse error. JSON: {}", json_str);
+                                }
                             }
                         }
                     }
                 }
             }
-        }
-    });
+        });
+    }
 }
 
 pub async fn get_hardware_specs_async() -> Result<String, Box<dyn std::error::Error>> {

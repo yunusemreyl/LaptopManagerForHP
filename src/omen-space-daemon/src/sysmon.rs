@@ -48,6 +48,7 @@ pub struct HardwareSpecs {
     pub ssd_spec: String,
     pub os_spec: String,
     pub bios_version: String,
+    pub ec_version: String,
     pub vbios_version: String,
     pub nvidia_driver: String,
     pub kernel_version: String,
@@ -191,7 +192,10 @@ pub fn get_hardware_specs() -> HardwareSpecs {
         let clean_cpu = cpu_name
             .replace("(R)", "")
             .replace("(TM)", "")
+            .replace("12th Gen ", "")
             .replace("13th Gen ", "")
+            .replace("14th Gen ", "")
+            .replace("15th Gen ", "")
             .trim()
             .to_string();
         specs.cpu_spec = if cpu_cores > 0 {
@@ -236,7 +240,7 @@ pub fn get_hardware_specs() -> HardwareSpecs {
                 }
             }
         }
-        specs.ram_spec = format!("{} GB DDR", total_gb);
+        specs.ram_spec = format!("{} GB RAM", total_gb);
 
         // 5. SSD Model & Size
         let mut ssd_str = String::from("NVMe SSD");
@@ -279,10 +283,18 @@ pub fn get_hardware_specs() -> HardwareSpecs {
         specs.os_spec = format!("{}  ·  Linux {}", os_name, kernel);
 
         // 7. BIOS Version
-        specs.bios_version = fs::read_to_string("/sys/class/dmi/id/bios_version")
-            .unwrap_or_else(|_| "F.14".to_string())
-            .trim()
-            .to_string();
+        if let Ok(bios) = fs::read_to_string("/sys/class/dmi/id/bios_version") {
+            specs.bios_version = bios.trim().to_string();
+        } else {
+            specs.bios_version = "Unknown".to_string();
+        }
+
+        // 7.1 EC Version
+        if let Ok(ec) = fs::read_to_string("/sys/class/dmi/id/ec_firmware_release") {
+            specs.ec_version = ec.trim().to_string();
+        } else {
+            specs.ec_version = "Unknown".to_string();
+        }
 
         // 8. vBIOS Version
         if let Ok(output) = Command::new("nvidia-smi")
@@ -311,7 +323,7 @@ pub fn get_hardware_specs() -> HardwareSpecs {
                 }
                 None
             })
-            .unwrap_or_else(|| "610.57.04".to_string());
+            .unwrap_or_else(|| "Unknown".to_string());
 
         specs
     }).clone()

@@ -84,7 +84,7 @@ impl DesktopNotifier {
 
     /// Open browser directly to GitHub Issue creation page with pre-filled title and body
     pub fn open_github_issue(title: &str, body: &str) {
-        let repo_url = "https://github.com/yunusemreyl/OmenCtl/issues/new";
+        let repo_url = "https://github.com/yunusemreyl/omen-space/issues/new";
         let encoded_title = url_encode(title);
         let encoded_body = url_encode(body);
         let full_url = format!("{}?title={}&body={}", repo_url, encoded_title, encoded_body);

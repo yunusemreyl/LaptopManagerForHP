@@ -21,15 +21,20 @@ fn get_nvidia_driver_version() -> String {
             }
         }
     }
-    "610.57.04 (NVIDIA Open Kernel)".to_string()
+    "Unknown".to_string()
 }
 
-fn detect_active_display_gpu() -> (String, bool) {
+fn detect_active_display_gpu() -> (String, bool, String, String) {
+    let specs = crate::daemon_client::get_hardware_specs_sync();
+    let gpu_name = specs.gpu_spec.split("  ·  ").next().unwrap_or("NVIDIA GPU").to_string();
+    let is_amd = specs.cpu_spec.to_lowercase().contains("ryzen") || specs.cpu_spec.to_lowercase().contains("amd");
+    let igpu_name = if is_amd { "AMD Radeon Graphics".to_string() } else { "Intel Integrated Graphics".to_string() };
+
     if let Ok(entries) = glob::glob("/sys/class/drm/card[0-9]*-*eDP-1*/device/vendor") {
         for entry in entries.filter_map(Result::ok) {
             if let Ok(vendor) = fs::read_to_string(entry) {
                 if vendor.trim().to_lowercase() == "0x10de" {
-                    return ("eDP-1 → NVIDIA RTX 4050 (Discrete)".to_string(), true);
+                    return (format!("eDP-1 → {} (Discrete)", gpu_name), true, gpu_name, igpu_name);
                 }
             }
         }
@@ -38,12 +43,12 @@ fn detect_active_display_gpu() -> (String, bool) {
         for entry in entries.filter_map(Result::ok) {
             if let Ok(vendor) = fs::read_to_string(entry) {
                 if vendor.trim().to_lowercase() == "0x10de" {
-                    return ("eDP-1 → NVIDIA RTX 4050 (Discrete)".to_string(), true);
+                    return (format!("eDP-1 → {} (Discrete)", gpu_name), true, gpu_name, igpu_name);
                 }
             }
         }
     }
-    ("eDP-1 → Intel Iris Xe (Hybrid)".to_string(), false)
+    (format!("eDP-1 → {} (Hybrid)", igpu_name), false, gpu_name, igpu_name)
 }
 
 pub fn build_page() -> gtk::Box {
@@ -53,7 +58,7 @@ pub fn build_page() -> gtk::Box {
         .build();
 
     let drv_version = get_nvidia_driver_version();
-    let (disp_info, is_discrete_active) = detect_active_display_gpu();
+    let (disp_info, is_discrete_active, gpu_name, igpu_name) = detect_active_display_gpu();
 
     // ── Header ───────────────────────────────────────────────
     let hdr = gtk::Box::builder()
@@ -196,26 +201,28 @@ pub fn build_page() -> gtk::Box {
     // Wire MUX toggles to daemon
     let w_c = warn_card.clone();
     let d_val = disp_val.clone();
+    let gpu_n1 = gpu_name.clone();
     btn_discrete.connect_toggled(move |btn| {
         if btn.is_active() {
             crate::daemon_client::set_gpu_mode_sync("discrete".to_string());
             if !is_discrete_active {
                 w_c.set_visible(true);
             }
-            d_val.set_label("eDP-1 → NVIDIA RTX 4050 (Discrete)");
+            d_val.set_label(&format!("eDP-1 → {} (Discrete)", gpu_n1));
             d_val.set_css_classes(&["badge-warn"]);
         }
     });
 
     let w_c2 = warn_card.clone();
     let d_val2 = disp_val.clone();
+    let igpu_n1 = igpu_name.clone();
     btn_hybrid.connect_toggled(move |btn| {
         if btn.is_active() {
             crate::daemon_client::set_gpu_mode_sync("hybrid".to_string());
             if is_discrete_active {
                 w_c2.set_visible(true);
             }
-            d_val2.set_label("eDP-1 → Intel Iris Xe (Hybrid)");
+            d_val2.set_label(&format!("eDP-1 → {} (Hybrid)", igpu_n1));
             d_val2.set_css_classes(&["badge-ok"]);
         }
     });

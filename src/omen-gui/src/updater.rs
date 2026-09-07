@@ -69,17 +69,12 @@ pub fn build_page(window: &adw::ApplicationWindow) -> gtk::Box {
         .description(i18n::t("firmware_desc"))
         .build();
 
-    for (device, ver, status, status_class) in [
-        ("HP BIOS",          specs.bios_version.as_str(),   i18n::t("up_to_date"),      "badge-ok"),
-        ("HP EC Firmware",   "1.0.4",                       i18n::t("up_to_date"),      "badge-ok"),
-        ("NVIDIA vBIOS",     specs.vbios_version.as_str(),  i18n::t("up_to_date"),      "badge-ok"),
+    for (device, ver) in [
+        ("HP BIOS",          specs.bios_version.as_str()),
+        ("HP EC Firmware",   specs.ec_version.as_str()),
+        ("NVIDIA vBIOS",     specs.vbios_version.as_str()),
     ] {
         let row = adw::ActionRow::builder().title(device).subtitle(ver).build();
-        row.add_suffix(&gtk::Label::builder()
-            .label(status)
-            .css_classes([status_class])
-            .valign(gtk::Align::Center)
-            .build());
         fw_group.add(&row);
     }
 
@@ -367,19 +362,32 @@ fn start_update_process(vbox: gtk::Box, dialog: gtk::Window) {
             glib::ControlFlow::Continue
         });
 
-        let home_dir = std::env::var("HOME").unwrap_or_else(|_| "/root".to_string());
-        let setup_path = format!("{}/omen-space/setup.sh", home_dir);
+        let setup_path = if std::path::Path::new("/usr/share/omen-space/setup.sh").exists() {
+            "/usr/share/omen-space/setup.sh".to_string()
+        } else if std::path::Path::new("/opt/omen-space/setup.sh").exists() {
+            "/opt/omen-space/setup.sh".to_string()
+        } else {
+            let home_dir = std::env::var("HOME").unwrap_or_else(|_| "/root".to_string());
+            format!("{}/omen-space/setup.sh", home_dir)
+        };
         
-        let mut cmd = tokio::process::Command::new("pkexec")
+        let mut cmd = match tokio::process::Command::new("pkexec")
             .arg(setup_path)
             .arg("update")
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
-            .spawn()
-            .expect("Failed to spawn pkexec");
+            .spawn() {
+                Ok(c) => c,
+                Err(e) => {
+                    pulse_source.remove();
+                    pbar_clone.set_fraction(1.0);
+                    title_lbl.set_label(&format!("Update Failed: {}", e));
+                    return;
+                }
+            };
 
-        let stdout = cmd.stdout.take().unwrap();
-        let stderr = cmd.stderr.take().unwrap();
+        let stdout = if let Some(s) = cmd.stdout.take() { s } else { return; };
+        let stderr = if let Some(s) = cmd.stderr.take() { s } else { return; };
 
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
         let tx1 = tx.clone();

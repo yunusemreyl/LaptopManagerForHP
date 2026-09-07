@@ -393,8 +393,11 @@ fn start_update_process(vbox: gtk::Box, dialog: gtk::Window) {
             glib::ControlFlow::Continue
         });
 
+        let home_dir = std::env::var("HOME").unwrap_or_else(|_| "/root".to_string());
+        let setup_path = format!("{}/omen-space/setup.sh", home_dir);
+        
         let mut cmd = tokio::process::Command::new("pkexec")
-            .arg("/home/yunus/OMENSpace/setup.sh")
+            .arg(setup_path)
             .arg("update")
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())

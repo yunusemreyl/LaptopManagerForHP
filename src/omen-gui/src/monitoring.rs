@@ -521,7 +521,11 @@ pub fn build_page(is_general: bool) -> gtk::Box {
         gpu_ui.temp_label.set_label(&format!("{}°C", g_avg));
         gpu_ui.load_bar.set_fraction(stats.gpu_load);
         gpu_ui.load_pct_label.set_label(&format!("{}%", (stats.gpu_load * 100.0) as i32));
-        gpu_ui.pwr_label.set_label(&format!("{:.1}W", stats.gpu_pwr));
+        if stats.gpu_pwr < 0.0 {
+            gpu_ui.pwr_label.set_label("D3Cold");
+        } else {
+            gpu_ui.pwr_label.set_label(&format!("{:.1}W", stats.gpu_pwr));
+        }
         gpu_ui.fan_label.set_label(&format!("{} RPM", stats.fan_rpm));
 
         dev_ui.ram_bar.set_fraction(stats.ram_frac);
@@ -534,14 +538,15 @@ pub fn build_page(is_general: bool) -> gtk::Box {
         if !is_general {
             let mut last = last_throttle.borrow_mut();
             let cpu_throttled = stats.cpu_throttle_count > *last && *last > 0 || stats.cpu_temp >= 95;
-            let gpu_throttled = stats.gpu_temp >= 87 || (stats.gpu_load > 0.9 && stats.gpu_pwr < 20.0);
+            let gpu_throttled = stats.gpu_temp >= 87 || (stats.gpu_load > 0.9 && stats.gpu_pwr >= 0.0 && stats.gpu_pwr < 20.0);
             
             let mut ch = cpu_history.borrow_mut();
             ch.remove(0); ch.push((stats.cpu_pwr, cpu_throttled));
             cpu_watt_ui.drawing_area.queue_draw();
 
+            let pwr = if stats.gpu_pwr < 0.0 { 0.0 } else { stats.gpu_pwr };
             let mut gh = gpu_history.borrow_mut();
-            gh.remove(0); gh.push((stats.gpu_pwr, gpu_throttled));
+            gh.remove(0); gh.push((pwr, gpu_throttled));
             gpu_watt_ui.drawing_area.queue_draw();
 
             cpu_watt_ui.warning_label.set_visible(cpu_throttled);

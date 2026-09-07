@@ -18,7 +18,7 @@ use zbus::interface;
 use log::{info, warn};
 use glob::glob;
 
-const HP_WMI_GRAPHICS_MODE_PATH: &str = "/sys/devices/platform/hp-omen-extra/omen_mux";
+const HP_WMI_GRAPHICS_MODE_PATH: &str = "/sys/devices/platform/hp-wmi/gpu_mux_mode";
 const CONFIG_PATH: &str = "/etc/omen-space/mux.json";
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

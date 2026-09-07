@@ -27,6 +27,7 @@
 #include <linux/minmax.h>
 #include <linux/module.h>
 #include <linux/mutex.h>
+#include <linux/pci.h>
 #include <linux/platform_device.h>
 #include <linux/platform_profile.h>
 #include <linux/power_supply.h>
@@ -34,6 +35,7 @@
 #include <linux/slab.h>
 #include <linux/string.h>
 #include <linux/types.h>
+#include <linux/version.h>
 #include <linux/workqueue.h>
 
 MODULE_AUTHOR("Matthew Garrett <mjg59@srcf.ucam.org>");
@@ -62,6 +64,12 @@ enum hp_ec_offsets {
 #define HP_FAN_SPEED_AUTOMATIC  0x00
 #define HP_POWER_LIMIT_DEFAULT  0x00
 #define HP_POWER_LIMIT_NO_CHANGE 0xFF
+#define HPWMI_MUX_MODE_UMA		BIT(0)
+#define HPWMI_MUX_MODE_HYBRID		BIT(1)
+#define HPWMI_MUX_MODE_DISCRETE		BIT(2)
+#define HPWMI_MUX_MODE_OPTIMUS		BIT(3)
+#define HPWMI_MUX_MODE_MASK		GENMASK(6, 0)
+#define HPWMI_MUX_LEGACY_MASK		(HPWMI_MUX_MODE_HYBRID | HPWMI_MUX_MODE_DISCRETE)
 
 #define ACPI_AC_CLASS "ac_adapter"
 
@@ -160,6 +168,7 @@ static const struct thermal_profile_params omen_v1_unknown_ec_thermal_params = {
  * parameters.
  */
 static struct thermal_profile_params *active_thermal_profile_params;
+static bool has_mux = false;
 
 /*
  * DMI board names of devices that should use the omen specific path for
@@ -401,6 +410,7 @@ enum hp_wmi_commandtype {
 	HPWMI_POSTCODEERROR_QUERY = 0x2a,
 	HPWMI_SYSTEM_DEVICE_MODE  = 0x40,
 	HPWMI_THERMAL_PROFILE_QUERY = 0x4c,
+	HPWMI_GRAPHICS_MUX_QUERY    = 0x52,
 };
 
 struct victus_power_limits {
@@ -1445,6 +1455,152 @@ err_free_dev:
 	return err;
 }
 
+static const u8 mux_bitmask_map[] = {
+	[0] = HPWMI_MUX_MODE_HYBRID,
+	[1] = HPWMI_MUX_MODE_DISCRETE,
+	[2] = HPWMI_MUX_MODE_OPTIMUS,
+	[3] = HPWMI_MUX_MODE_UMA,
+};
+
+static bool has_nvidia_gpu(void)
+{
+	struct pci_dev *pdev = NULL;
+	while ((pdev = pci_get_class(PCI_CLASS_DISPLAY_VGA << 8, pdev))) {
+		if (pdev->vendor == PCI_VENDOR_ID_NVIDIA) {
+			pci_dev_put(pdev);
+			return true;
+		}
+	}
+	while ((pdev = pci_get_class(PCI_CLASS_DISPLAY_3D << 8, pdev))) {
+		if (pdev->vendor == PCI_VENDOR_ID_NVIDIA) {
+			pci_dev_put(pdev);
+			return true;
+		}
+	}
+	return false;
+}
+
+static int hp_wmi_get_mux_supported_modes(u8 *supported)
+{
+	u8 legacy_buffer[4] = {};
+	u8 buffer[128] = {};
+	u32 req_packet = 0;
+	int ret;
+
+	if (!supported)
+		return -EINVAL;
+
+	/* Try modern BIOS design data query (128-byte buffer) */
+	ret = hp_wmi_perform_query(HPWMI_GET_SYSTEM_DESIGN_DATA, HPWMI_GM,
+				   buffer, zero_if_sup(req_packet), sizeof(buffer));
+	if (ret == 0) {
+		*supported = buffer[7];
+		return 0;
+	}
+
+	/*
+	 * (Fallback): Legacy BIOS behavior based on Omen Gaming Hub.
+	 * If the modern query is not supported, check if the MUX query endpoint
+	 * responds to a read request. If it succeeds, the hardware has MUX
+	 * capability but lacks the mode map, defaulting to Hybrid + Discrete.
+	 *
+	 * DANGER: Sending HPWMI_GRAPHICS_MUX_QUERY to unsupported models (e.g.,
+	 * AMD Advantage laptops like OMEN 16-xd0xxx) will cause a severe ACPI
+	 * fault and a kernel panic. Only proceed if an NVIDIA GPU is present.
+	 */
+	if (!has_nvidia_gpu())
+		return -ENODEV;
+
+	ret = hp_wmi_perform_query(HPWMI_GRAPHICS_MUX_QUERY, HPWMI_READ,
+				   legacy_buffer, sizeof(legacy_buffer), 0);
+	if (ret < 0)
+		return ret;
+	if (ret > 0)
+		return -EINVAL;
+
+	*supported = HPWMI_MUX_LEGACY_MASK;
+	return 0;
+}
+
+static int hp_wmi_get_mux_mode(u8 *mode)
+{
+	u8 buffer[4] = {};
+	int ret;
+
+	if (!mode)
+		return -EINVAL;
+
+	ret = hp_wmi_perform_query(HPWMI_GRAPHICS_MUX_QUERY, HPWMI_READ,
+				   buffer, sizeof(buffer), sizeof(buffer));
+	if (ret < 0)
+		return ret;
+	if (ret > 0)
+		return -EINVAL;
+
+	/* Mask the highest bit, which might be used as a BIOS status flag */
+	*mode = buffer[0] & HPWMI_MUX_MODE_MASK;
+	return 0;
+}
+
+static int hp_wmi_set_mux_mode(u8 mode)
+{
+	u8 buffer[4] = { mode, 0x00, 0x00, 0x00 };
+	int ret;
+
+	ret = hp_wmi_perform_query(HPWMI_GRAPHICS_MUX_QUERY, HPWMI_WRITE,
+				   buffer, sizeof(buffer), sizeof(buffer));
+	if (ret < 0)
+		return ret;
+	if (ret > 0)
+		return -EINVAL;
+
+	return 0;
+}
+
+static ssize_t gpu_mux_mode_show(struct device *dev,
+				 struct device_attribute *attr,
+				 char *buf)
+{
+	u8 mode;
+	int ret;
+
+	ret = hp_wmi_get_mux_mode(&mode);
+	if (ret)
+		return ret;
+
+	return sysfs_emit(buf, "%u\n", mode);
+}
+
+static ssize_t gpu_mux_mode_store(struct device *dev,
+				  struct device_attribute *attr,
+				  const char *buf,
+				  size_t count)
+{
+	u32 requested;
+	u8 supported;
+	int ret;
+
+	ret = kstrtou32(buf, 0, &requested);
+	if (ret)
+		return ret;
+	if (requested >= ARRAY_SIZE(mux_bitmask_map))
+		return -EINVAL;
+
+	ret = hp_wmi_get_mux_supported_modes(&supported);
+	if (ret)
+		return ret;
+
+	/* Verify if the requested mode is allowed by the hardware mask */
+	if (!(supported & mux_bitmask_map[requested]))
+		return -EOPNOTSUPP;
+
+	ret = hp_wmi_set_mux_mode(requested);
+	if (ret)
+		return ret;
+
+	return count;
+}
+
 static DEVICE_ATTR_RO(display);
 static DEVICE_ATTR_RO(hddtemp);
 static DEVICE_ATTR_RW(als);
@@ -1454,6 +1610,7 @@ static DEVICE_ATTR_RW(postcode);
 static DEVICE_ATTR_RW(graphics_mode);
 static DEVICE_ATTR_RW(gpu_tgp);
 static DEVICE_ATTR_RW(gpu_ppab);
+static DEVICE_ATTR_RW(gpu_mux_mode);
 
 static struct attribute *hp_wmi_attrs[] = {
 	&dev_attr_display.attr,
@@ -1465,6 +1622,7 @@ static struct attribute *hp_wmi_attrs[] = {
 	&dev_attr_graphics_mode.attr,
 	&dev_attr_gpu_tgp.attr,
 	&dev_attr_gpu_ppab.attr,
+	&dev_attr_gpu_mux_mode.attr,
 	NULL,
 };
 
@@ -1473,6 +1631,9 @@ static umode_t hp_wmi_attrs_is_visible(struct kobject *kobj,
 {
 	if (attr == &dev_attr_graphics_mode.attr)
 		return hp_wmi_gpu_mode_supported() ? attr->mode : 0;
+
+	if (attr == &dev_attr_gpu_mux_mode.attr)
+		return has_mux ? attr->mode : 0;
 
 	if (attr == &dev_attr_gpu_tgp.attr || attr == &dev_attr_gpu_ppab.attr)
 		return is_victus_s_thermal_profile() ? attr->mode : 0;
@@ -2507,6 +2668,7 @@ static inline void victus_s_unregister_powersource_event_handler(void)
 	unregister_acpi_notifier(&platform_power_source_nb);
 }
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 14, 0)
 static const struct platform_profile_ops platform_profile_omen_ops = {
 	.probe       = hp_wmi_platform_profile_probe,
 	.profile_get = platform_profile_omen_get,
@@ -2530,10 +2692,35 @@ static const struct platform_profile_ops hp_wmi_platform_profile_ops = {
 	.profile_get = hp_wmi_platform_profile_get,
 	.profile_set = hp_wmi_platform_profile_set,
 };
+#else
+static struct platform_profile_handler platform_profile_omen_handler = {
+	.profile_get = platform_profile_omen_get,
+	.profile_set = platform_profile_omen_set,
+};
+
+static struct platform_profile_handler platform_profile_victus_handler = {
+	.profile_get = platform_profile_victus_get,
+	.profile_set = platform_profile_victus_set,
+};
+
+static struct platform_profile_handler platform_profile_victus_s_handler = {
+	.profile_get = platform_profile_omen_get,
+	.profile_set = platform_profile_victus_s_set,
+};
+
+static struct platform_profile_handler hp_wmi_platform_profile_handler = {
+	.profile_get = hp_wmi_platform_profile_get,
+	.profile_set = hp_wmi_platform_profile_set,
+};
+#endif
 
 static int thermal_profile_setup(struct platform_device *device)
 {
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 14, 0)
 	const struct platform_profile_ops *ops;
+#else
+	struct platform_profile_handler *handler;
+#endif
 	int err, tp;
 
 	if (is_omen_thermal_profile()) {
@@ -2547,7 +2734,11 @@ static int thermal_profile_setup(struct platform_device *device)
 		if (err < 0)
 			pr_warn("Failed to apply initial omen thermal profile (%d), continuing\n", err);
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 14, 0)
 		ops = &platform_profile_omen_ops;
+#else
+		handler = &platform_profile_omen_handler;
+#endif
 
 	} else if (is_victus_thermal_profile()) {
 		err = platform_profile_victus_get_ec(&active_platform_profile);
@@ -2560,7 +2751,11 @@ static int thermal_profile_setup(struct platform_device *device)
 		if (err < 0)
 			pr_warn("Failed to apply initial thermal profile (%d), continuing\n", err);
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 14, 0)
 		ops = &platform_profile_victus_ops;
+#else
+		handler = &platform_profile_victus_handler;
+#endif
 
 	} else if (is_victus_s_thermal_profile()) {
 		if (!active_thermal_profile_params) {
@@ -2589,7 +2784,11 @@ static int thermal_profile_setup(struct platform_device *device)
 		if (err < 0)
 			pr_warn("Failed to apply initial thermal profile (%d), continuing\n", err);
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 14, 0)
 		ops = &platform_profile_victus_s_ops;
+#else
+		handler = &platform_profile_victus_s_handler;
+#endif
 
 	} else {
 		tp = thermal_profile_get();
@@ -2600,13 +2799,23 @@ static int thermal_profile_setup(struct platform_device *device)
 		if (err)
 			return err;
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 14, 0)
 		ops = &hp_wmi_platform_profile_ops;
+#else
+		handler = &hp_wmi_platform_profile_handler;
+#endif
 	}
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 14, 0)
 	platform_profile_device =
 		devm_platform_profile_register(&device->dev, "hp-wmi", NULL, ops);
 	if (IS_ERR(platform_profile_device))
 		return PTR_ERR(platform_profile_device);
+#else
+	err = platform_profile_register(handler);
+	if (err)
+		return err;
+#endif
 
 	pr_info("Registered as platform profile handler\n");
 	platform_profile_support = true;
@@ -2671,6 +2880,12 @@ static void __exit hp_wmi_bios_remove(struct platform_device *device)
 	priv = platform_get_drvdata(device);
 	if (priv)
 		cancel_delayed_work_sync(&priv->keep_alive_dwork);
+
+	if (platform_profile_support) {
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 14, 0)
+		platform_profile_remove();
+#endif
+	}
 }
 
 static int hp_wmi_resume_handler(struct device *device)
@@ -3300,6 +3515,9 @@ static int __init hp_wmi_init(void)
 	}
 
 	if (bios_capable) {
+		u8 supported;
+		has_mux = (hp_wmi_get_mux_supported_modes(&supported) == 0);
+
 		hp_wmi_platform_dev = platform_device_register_simple(
 			"hp-wmi", PLATFORM_DEVID_NONE, NULL, 0);
 		if (IS_ERR(hp_wmi_platform_dev)) {

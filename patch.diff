@@ -1,0 +1,100 @@
+--- driver/hp-wmi.c
++++ driver/hp-wmi.c
+@@ -2505,6 +2505,7 @@
+ 	unregister_acpi_notifier(&platform_power_source_nb);
+ }
+ 
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 14, 0)
+ static const struct platform_profile_ops platform_profile_omen_ops = {
+ 	.probe       = hp_wmi_platform_profile_probe,
+ 	.profile_get = platform_profile_omen_get,
+@@ -2528,6 +2529,26 @@
+ 	.profile_get = hp_wmi_platform_profile_get,
+ 	.profile_set = hp_wmi_platform_profile_set,
+ };
++#else
++static struct platform_profile_handler platform_profile_omen_handler = {
++	.profile_get = platform_profile_omen_get,
++	.profile_set = platform_profile_omen_set,
++};
++
++static struct platform_profile_handler platform_profile_victus_handler = {
++	.profile_get = platform_profile_victus_get,
++	.profile_set = platform_profile_victus_set,
++};
++
++static struct platform_profile_handler platform_profile_victus_s_handler = {
++	.profile_get = platform_profile_omen_get,
++	.profile_set = platform_profile_victus_s_set,
++};
++
++static struct platform_profile_handler hp_wmi_platform_profile_handler = {
++	.profile_get = hp_wmi_platform_profile_get,
++	.profile_set = hp_wmi_platform_profile_set,
++};
++#endif
+ 
+ static int thermal_profile_setup(struct platform_device *device)
+ {
+@@ -2535,6 +2556,11 @@
+ 	int err, tp;
+ 
+ 	if (is_omen_thermal_profile()) {
+@@ -2550,7 +2576,11 @@
+ 		if (err < 0)
+ 			pr_warn("Failed to apply initial omen thermal profile (%d), continuing\n", err);
+ 
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 14, 0)
+ 		ops = &platform_profile_omen_ops;
++#else
++		platform_profile_handler = &platform_profile_omen_handler;
++#endif
+ 
+ 	} else if (is_victus_thermal_profile()) {
+@@ -2564,7 +2594,11 @@
+ 		if (err < 0)
+ 			pr_warn("Failed to apply initial thermal profile (%d), continuing\n", err);
+ 
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 14, 0)
+ 		ops = &platform_profile_victus_ops;
++#else
++		platform_profile_handler = &platform_profile_victus_handler;
++#endif
+ 
+ 	} else if (is_victus_s_thermal_profile()) {
+@@ -2592,7 +2626,11 @@
+ 		if (err < 0)
+ 			pr_warn("Failed to apply initial thermal profile (%d), continuing\n", err);
+ 
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 14, 0)
+ 		ops = &platform_profile_victus_s_ops;
++#else
++		platform_profile_handler = &platform_profile_victus_s_handler;
++#endif
+ 
+ 	} else {
+ 		tp = thermal_profile_get();
+@@ -2603,9 +2641,17 @@
+ 		if (err)
+ 			return err;
+ 
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 14, 0)
+ 		ops = &hp_wmi_platform_profile_ops;
++#else
++		platform_profile_handler = &hp_wmi_platform_profile_handler;
++#endif
+ 	}
+ 
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 14, 0)
+ 	platform_profile_device =
+ 		devm_platform_profile_register(&device->dev, "hp-wmi", NULL, ops);
+ 	if (IS_ERR(platform_profile_device))
+ 		return PTR_ERR(platform_profile_device);
++#else
++	err = platform_profile_register(platform_profile_handler);
++	if (err)
++		return err;
++#endif
+ 
+ 	pr_info("Registered as platform profile handler\n");
+ 	platform_profile_support = true;

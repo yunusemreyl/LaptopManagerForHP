@@ -1,13 +1,4 @@
 <div align="center">
-
-```text
- ____  __  ________  _   __   _____ ____  ___   ____________
- / __ \/  |/  / ____// | / /  / ___// __ \/   | / ____/ ____/
-/ / / / /|_/ / __/  /  |/ /   \__ \/ /_/ / /| |/ /   / __/   
-/ /_/ / /  / / /___ / /|  /   ___/ / ____/ ___ / /___/ /___   
-\____/_/  /_/_____//_/ |_/   /____/_/   /_/  |_\____/_____/   
-```
-
 <img src="images/omenspace.png" alt="OMENSpace Logo" width="150">
 
 **Next-Generation Linux Control Center for HP Omen, Victus & Transcend Laptops**  

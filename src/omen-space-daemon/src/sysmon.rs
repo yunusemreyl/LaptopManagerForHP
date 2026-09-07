@@ -61,6 +61,7 @@ struct SensorPaths {
     fan2_path: Option<PathBuf>,
     throttle_paths: Vec<PathBuf>,
     gpu_temp_path: Option<PathBuf>,
+    gpu_pwr_path: Option<PathBuf>,
     battery_pwr_path: Option<PathBuf>,
     rapl_energy_path: Option<PathBuf>,
 }
@@ -80,7 +81,6 @@ struct RaplState {
     time: std::time::Instant,
 }
 static PREV_RAPL: Mutex<Option<RaplState>> = Mutex::new(None);
-static NVML_INSTANCE: OnceLock<Option<nvml_wrapper::Nvml>> = OnceLock::new();
 
 fn init_sensor_paths() -> SensorPaths {
     let mut cpu_temp_path = None;
@@ -90,6 +90,7 @@ fn init_sensor_paths() -> SensorPaths {
     let mut throttle_paths = Vec::new();
 
     let mut gpu_temp_path = None;
+    let mut gpu_pwr_path = None;
     let mut battery_pwr_path = None;
     let mut rapl_energy_path = None;
 
@@ -108,9 +109,17 @@ fn init_sensor_paths() -> SensorPaths {
                     if f1.exists() { fan1_path = Some(f1); }
                     let f2 = entry.join("fan2_input");
                     if f2.exists() { fan2_path = Some(f2); }
-                } else if name.contains("nouveau") || name.contains("amdgpu") {
+                } else if name.contains("nouveau") || name.contains("amdgpu") || name.contains("nvidia") {
                     let t1 = entry.join("temp1_input");
                     if t1.exists() { gpu_temp_path = Some(t1); }
+                    
+                    let p1_avg = entry.join("power1_average");
+                    let p1_inp = entry.join("power1_input");
+                    if p1_avg.exists() {
+                        gpu_pwr_path = Some(p1_avg);
+                    } else if p1_inp.exists() {
+                        gpu_pwr_path = Some(p1_inp);
+                    }
                 }
             }
         }
@@ -144,6 +153,7 @@ fn init_sensor_paths() -> SensorPaths {
         fan2_path,
         throttle_paths,
         gpu_temp_path,
+        gpu_pwr_path,
         battery_pwr_path,
         rapl_energy_path,
     }
@@ -307,6 +317,25 @@ pub fn get_hardware_specs() -> HardwareSpecs {
     }).clone()
 }
 
+fn check_nvidia_state() -> Option<bool> {
+    if let Ok(entries) = glob::glob("/sys/bus/pci/devices/*/vendor") {
+        for entry in entries.filter_map(Result::ok) {
+            if let Ok(vendor) = fs::read_to_string(&entry) {
+                if vendor.trim().to_lowercase() == "0x10de" {
+                    if let Some(parent) = entry.parent() {
+                        let status_path = parent.join("power/runtime_status");
+                        if let Ok(status) = fs::read_to_string(status_path) {
+                            return Some(status.trim() == "active");
+                        }
+                    }
+                    return Some(true);
+                }
+            }
+        }
+    }
+    None
+}
+
 /// Instantaneous, Zero-Fork Telemetry Fetch
 pub fn fetch_system_stats() -> SystemStats {
     let mut stats = SystemStats::default();
@@ -433,25 +462,44 @@ pub fn fetch_system_stats() -> SystemStats {
         }
     }
 
-    // ── 7. GPU Telemetry (NVML for zero-stutter real readings) ───────────────
-    let nvml_opt = NVML_INSTANCE.get_or_init(|| {
-        nvml_wrapper::Nvml::init().ok()
-    });
+    // ── 7. GPU Telemetry ───────────────────────────────────────────
+    let mut nvml_queried = false;
 
-    if let Some(nvml) = nvml_opt {
-        if let Ok(device) = nvml.device_by_index(0) {
-            if let Ok(temp) = device.temperature(nvml_wrapper::enum_wrappers::device::TemperatureSensor::Gpu) {
-                stats.gpu_temp = temp as i32;
+    let nvidia_state = check_nvidia_state();
+    let is_nvidia_awake = nvidia_state.unwrap_or(false);
+    let has_nvidia = nvidia_state.is_some();
+
+    // Check if NVIDIA is awake before initializing NVML to avoid waking it from D3cold
+    if is_nvidia_awake {
+        if let Ok(nvml) = nvml_wrapper::Nvml::init() {
+            if let Ok(device) = nvml.device_by_index(0) {
+                if let Ok(temp) = device.temperature(nvml_wrapper::enum_wrappers::device::TemperatureSensor::Gpu) {
+                    stats.gpu_temp = temp as i32;
+                    nvml_queried = true;
+                }
+                if let Ok(power) = device.power_usage() {
+                    // power is in milliwatts
+                    stats.gpu_pwr = power as f64 / 1000.0;
+                    nvml_queried = true;
+                }
             }
-            if let Ok(power) = device.power_usage() {
-                // power is in milliwatts
-                stats.gpu_pwr = power as f64 / 1000.0;
+            // nvml is dropped here, closing /dev/nvidia0 and allowing GPU to sleep later
+        }
+    }
+
+    if !nvml_queried {
+        if let Some(ref p) = paths.gpu_temp_path {
+            if let Ok(s) = fs::read_to_string(p) {
+                if let Ok(milli) = s.trim().parse::<f64>() {
+                    stats.gpu_temp = (milli / 1000.0) as i32;
+                }
             }
         }
-    } else if let Some(ref p) = paths.gpu_temp_path {
-        if let Ok(s) = fs::read_to_string(p) {
-            if let Ok(milli) = s.trim().parse::<f64>() {
-                stats.gpu_temp = (milli / 1000.0) as i32;
+        if let Some(ref p) = paths.gpu_pwr_path {
+            if let Ok(s) = fs::read_to_string(p) {
+                if let Ok(micro) = s.trim().parse::<f64>() {
+                    stats.gpu_pwr = micro / 1_000_000.0;
+                }
             }
         }
     }
@@ -480,6 +528,10 @@ pub fn fetch_system_stats() -> SystemStats {
     if stats.gpu_temp == 0 { stats.gpu_temp = stats.cpu_temp.saturating_sub(4); }
     if stats.cpu_pwr == 0.0 && !real_pwr { stats.cpu_pwr = stats.total_pwr * 0.45; }
     if stats.gpu_pwr == 0.0 && !real_pwr { stats.gpu_pwr = stats.total_pwr * 0.15; }
+
+    if has_nvidia && !is_nvidia_awake {
+        stats.gpu_pwr = -1.0;
+    }
 
     // Sanitize any NaNs that might crash JSON serialization
     if stats.cpu_load.is_nan() { stats.cpu_load = 0.0; }
@@ -640,6 +692,10 @@ impl SysMonInterface {
         report.push_str("\n## EC Registers — Snapshot\n\n");
 
         // Try to load ec_sys with write_support so debugfs exposes the io node
+        let _ = std::process::Command::new("modprobe")
+            .arg("-r")
+            .arg("ec_sys")
+            .output();
         let _ = std::process::Command::new("modprobe")
             .args(["ec_sys", "write_support=1"])
             .output();

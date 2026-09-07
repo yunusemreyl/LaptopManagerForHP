@@ -1,4 +1,5 @@
 [workspace]
+rust-version = "1.75"
 members = [
     "src/omen-space-daemon",
     "src/omen-cli",

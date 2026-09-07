@@ -39,7 +39,6 @@ MODULE_LICENSE("GPL");
 enum hp_wmi_command {
   HPWMI_READ = 0x01,
   HPWMI_WRITE = 0x02,
-  HPWMI_MUX_QUERY = 0x52,
   HPWMI_BACKLIGHT = 0x20009,
   HPWMI_GAMING_KEY = 0x2000B,
 };
@@ -149,9 +148,7 @@ static int hp_wmi_perform_query(int query, enum hp_wmi_command command,
 		if (ret != 0x3 || query != 0x0)
 			pr_warn("query 0x%x returned error 0x%x\n", query, ret);
 		goto out_free;
-	} else if (query == HPWMI_MUX_QUERY) {
-        pr_info("hp-omen-extra: query 0x52 SUCCESS, outsize=%d\n", outsize);
-    }
+	}
 
 	if (!outsize)
 		goto out_free;
@@ -328,49 +325,7 @@ static ssize_t win_lock_store(struct device *dev,
   return ret ? ret : count;
 }
 
-/* ── omen mux switch (hardware gpu switch) ── */
-static ssize_t omen_mux_show(struct device *dev,
-                              struct device_attribute *attr, char *buf) {
-  /*
-   * HP BIOS does not support reading the MUX state via 0x52.
-   * Return a dummy value. The python userspace daemon will use lspci.
-   */
-  return sysfs_emit(buf, "-1\n");
-}
 
-static ssize_t omen_mux_store(struct device *dev,
-                               struct device_attribute *attr, const char *buf,
-                               size_t count) {
-  unsigned int val;
-  u8 data[4] = {0, 0, 0, 0};
-  int ret;
-
-  if (kstrtouint(buf, 10, &val))
-    return -EINVAL;
-  if (val > 1)
-    return -EINVAL;
-
-  /*
-   * Write MUX state using command 0x02 and commandtype 0x52 (HPWMI_MUX_QUERY).
-   * Payload: [mode, 0x00, 0x00, 0x00]. mode: 0=Hybrid, 1=Discrete.
-   */
-  data[0] = val ? 0x01 : 0x00;
-
-  ret = hp_wmi_perform_query(HPWMI_MUX_QUERY, HPWMI_WRITE, data,
-                       sizeof(data), sizeof(data));
-
-  if (ret) {
-    pr_warn("hp-omen-extra: MUX WRITE failed (%d). Falling back to READ command.\n", ret);
-    /* Fallback to 0x01 command just like OmenFlow if 0x02 fails */
-    ret = hp_wmi_perform_query(HPWMI_MUX_QUERY, HPWMI_READ, data,
-                         sizeof(data), sizeof(data));
-  }
-
-  if (ret)
-    return ret < 0 ? ret : -EOPNOTSUPP;
-
-  return count;
-}
 
 /* ── sysfs attributes ── */
 static DEVICE_ATTR(zone0, 0644, zone_show, zone_store);
@@ -383,13 +338,12 @@ static DEVICE_ATTR(zone6, 0644, zone_show, zone_store);
 static DEVICE_ATTR(zone7, 0644, zone_show, zone_store);
 static DEVICE_ATTR_RW(brightness);
 static DEVICE_ATTR_RW(win_lock);
-static DEVICE_ATTR_RW(omen_mux);
 
 static struct attribute *hp_omen_extra_attrs[] = {
     &dev_attr_zone0.attr, &dev_attr_zone1.attr, &dev_attr_zone2.attr,
     &dev_attr_zone3.attr, &dev_attr_zone4.attr, &dev_attr_zone5.attr,
     &dev_attr_zone6.attr, &dev_attr_zone7.attr, &dev_attr_brightness.attr,
-    &dev_attr_win_lock.attr, &dev_attr_omen_mux.attr, NULL,
+    &dev_attr_win_lock.attr, NULL,
 };
 ATTRIBUTE_GROUPS(hp_omen_extra);
 

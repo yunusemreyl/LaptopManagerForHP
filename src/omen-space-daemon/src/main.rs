@@ -31,7 +31,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
     info!("Starting omen-space-daemon v{}", env!("CARGO_PKG_VERSION"));
     
     // Load ec_sys module for EC diagnostics
-    let _ = std::process::Command::new("modprobe").arg("ec_sys").status();
+    let _ = std::process::Command::new("modprobe").arg("-r").arg("ec_sys").status();
+    let _ = std::process::Command::new("modprobe").args(["ec_sys", "write_support=1"]).status();
 
     // Run startup conflict detection check
     let conflicts = conflict_detector::ConflictDetector::check_conflicts();

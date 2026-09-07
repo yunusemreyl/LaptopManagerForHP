@@ -4,7 +4,7 @@
 **Next-Generation Linux Control Center for HP Omen, Victus & Transcend Laptops**  
 *An open-source, Rust-powered GTK4 suite for managing performance profiles, custom fan curves, RGB lighting, Ryzen SMU tuning, and hardware limits seamlessly on Linux.*
 
-[![Version: 2.0.0](https://img.shields.io/badge/Release-v2.0.0-blue.svg)](https://github.com/yunusemreyl/omen-space/releases)
+[![Version: 2.0.1](https://img.shields.io/badge/Release-v2.0.1-blue.svg)](https://github.com/yunusemreyl/omen-space/releases)
 [![License: GPL-3.0](https://img.shields.io/badge/License-GPL%203.0-green.svg)](LICENSE)
 [![Platform: Linux](https://img.shields.io/badge/Platform-Linux-lightgrey.svg)]()
 [![Built with Rust](https://img.shields.io/badge/Language-Rust-orange.svg)]()

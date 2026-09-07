@@ -107,7 +107,7 @@ if [ "$CHANNEL" == "stable" ]; then
 
     # Fallback to v2.0.0 if API query failed or was empty
     if [ -z "$LATEST_TAG" ]; then
-        LATEST_TAG="v2.0.0"
+        LATEST_TAG="v2.0.1"
     fi
 
     TARGET_REF="$LATEST_TAG"

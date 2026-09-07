@@ -52,10 +52,10 @@
               mkdir -p $out/share/pixmaps
               mkdir -p $out/share/omen-space/assets
 
-              cp src/omen-space-daemon/target/release/omen-space-daemon $out/libexec/omen-space/omen-space-daemon
-              cp src/omen-cli/target/release/omen-cli $out/bin/
-              cp src/omen-tray/target/release/omen-tray $out/bin/
-              cp src/omen-gui/target/release/omen-gui $out/bin/
+              cp target/*/release/omen-space-daemon $out/libexec/omen-space/omen-space-daemon || cp target/release/omen-space-daemon $out/libexec/omen-space/omen-space-daemon
+              cp target/*/release/omen-cli $out/bin/ || cp target/release/omen-cli $out/bin/
+              cp target/*/release/omen-tray $out/bin/ || cp target/release/omen-tray $out/bin/
+              cp target/*/release/omen-gui $out/bin/ || cp target/release/omen-gui $out/bin/
 
               cp data/omen-space-daemon.service $out/lib/systemd/system/
               cp data/sysusers.d/omen-space.conf $out/lib/sysusers.d/

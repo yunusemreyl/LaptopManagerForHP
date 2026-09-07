@@ -209,8 +209,8 @@ do_install() {
         local name="$1"
         if [[ -f "$SCRIPT_DIR/target/release/$name" ]]; then
             echo "$SCRIPT_DIR/target/release/$name"
-        elif [[ -f "$SCRIPT_DIR/src/$name/target/release/$name" ]]; then
-            echo "$SCRIPT_DIR/src/$name/target/release/$name"
+        elif [[ -n "$(ls $SCRIPT_DIR/target/*/release/$name 2>/dev/null)" ]]; then
+            ls $SCRIPT_DIR/target/*/release/$name | head -n 1
         else
             echo ""
         fi
@@ -222,13 +222,13 @@ do_install() {
     local gui_bin=$(find_bin "omen-gui")
 
     rm -f /usr/libexec/omen-space/omen-space-daemon
-    cp "${daemon_bin:-src/omen-space-daemon/target/release/omen-space-daemon}" /usr/libexec/omen-space/
+    cp "${daemon_bin:-target/release/omen-space-daemon}" /usr/libexec/omen-space/
     rm -f /usr/bin/omen-cli
-    cp "${cli_bin:-src/omen-cli/target/release/omen-cli}" /usr/bin/
+    cp "${cli_bin:-target/release/omen-cli}" /usr/bin/
     rm -f /usr/bin/omen-tray
-    cp "${tray_bin:-src/omen-tray/target/release/omen-tray}" /usr/bin/
+    cp "${tray_bin:-target/release/omen-tray}" /usr/bin/
     rm -f /usr/bin/omen-gui
-    cp "${gui_bin:-src/omen-gui/target/release/omen-gui}" /usr/bin/
+    cp "${gui_bin:-target/release/omen-gui}" /usr/bin/
 
     cp data/org.hp.omen.conf /etc/dbus-1/system.d/
     cp data/omen-space-daemon.service /etc/systemd/system/

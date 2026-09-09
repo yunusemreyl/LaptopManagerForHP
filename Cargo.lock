@@ -1565,7 +1565,7 @@ dependencies = [
 
 [[package]]
 name = "omen-cli"
-version = "2.0.2"
+version = "2.0.3"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1581,7 +1581,7 @@ dependencies = [
 
 [[package]]
 name = "omen-gui"
-version = "2.0.2"
+version = "2.0.3"
 dependencies = [
  "glib",
  "glob",
@@ -1597,7 +1597,7 @@ dependencies = [
 
 [[package]]
 name = "omen-space-daemon"
-version = "2.0.2"
+version = "2.0.3"
 dependencies = [
  "env_logger 0.11.11",
  "evdev",
@@ -1615,7 +1615,7 @@ dependencies = [
 
 [[package]]
 name = "omen-tray"
-version = "2.0.2"
+version = "2.0.3"
 dependencies = [
  "env_logger 0.10.2",
  "futures",

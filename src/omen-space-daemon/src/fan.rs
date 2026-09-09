@@ -236,7 +236,9 @@ impl FanService {
     pub fn evaluate_spline(points: &[CurvePoint], temp: f64) -> f64 {
         if points.is_empty() { return 0.0; }
         if temp <= points[0].0 { return points[0].1; }
-        if temp >= points.last().unwrap().0 { return points.last().unwrap().1; }
+        if let Some(last) = points.last() {
+            if temp >= last.0 { return last.1; }
+        }
         for i in 0..points.len() - 1 {
             let x0 = points[i].0; let y0 = points[i].1;
             let x1 = points[i + 1].0; let y1 = points[i + 1].1;
@@ -244,7 +246,7 @@ impl FanService {
                 return y0 + (y1 - y0) * ((temp - x0) / (x1 - x0));
             }
         }
-        points.last().unwrap().1
+        points.last().map(|p| p.1).unwrap_or(0.0)
     }
 
     pub fn evaluate_step(points: &[CurvePoint], temp: f64) -> f64 {
@@ -384,8 +386,8 @@ impl FanService {
                 let mut state = self.state.lock().await;
                 
                 // Thermal Protection Logic ALWAYS uses raw temp for safety
-                if state.thermal_protection_enabled && temp > 95.0 && !state.thermal_protection_active {
-                    warn!("Temperature exceeded 95°C ({}°C). Activating Thermal Protection Mode (Max Fan).", temp);
+                if state.thermal_protection_enabled && temp > 90.0 && !state.thermal_protection_active {
+                    warn!("Temperature exceeded 90°C ({}°C). Activating Thermal Protection Mode (Max Fan).", temp);
                     state.thermal_protection_active = true;
                     state.thermal_protection_entered_at = std::time::Instant::now();
                     state.pre_protection_mode = Some(state.mode.clone());
@@ -409,7 +411,9 @@ impl FanService {
                         
                         info!("Temperature dropped to {}°C (active for {:.1}s) or protection disabled. Deactivating Thermal Protection Mode.", temp, elapsed);
                         state.thermal_protection_active = false;
-                        let restore = "auto".to_string(); // Always restore to auto as per user request
+                        let restore = state.pre_protection_mode.clone().unwrap_or_else(|| "auto".to_string());
+                        state.last_written_duty = None;
+                        state.last_auto_pct = 0;
                         Self::set_mode_internal(&mut state, &restore).await;
                         
                         let restore_msg = restore.clone();
@@ -678,6 +682,8 @@ impl FanService {
             state.mode = mode.to_string();
             state.last_targets.clear();
             state.last_keepalive = std::time::Instant::now();
+            state.last_written_duty = None;
+            state.last_auto_pct = 0;
             // Clear manual target when switching modes
             if mode == "auto" || mode == "max" || mode == "ec" || mode == "performance" {
                 state.manual_target_pct = None;
@@ -694,6 +700,8 @@ impl FanService {
             warn!("Fan mode '{}': pwm1_enable write failed or path absent — mode stored, duty writes will proceed via monitor loop", mode);
             state.mode = mode.to_string();
             state.last_targets.clear();
+            state.last_written_duty = None;
+            state.last_auto_pct = 0;
             if mode == "auto" || mode == "max" || mode == "ec" || mode == "performance" {
                 state.manual_target_pct = None;
             }

@@ -16,6 +16,7 @@ enum KeyboardMode {
     Omen4Zone,
     #[allow(dead_code)]
     PerKey,
+    DesktopRgb,
 }
 
 fn get_active_keyboard_mode(detected: KeyboardMode) -> KeyboardMode {
@@ -28,6 +29,7 @@ fn get_active_keyboard_mode(detected: KeyboardMode) -> KeyboardMode {
                         1 => KeyboardMode::Omen4Zone,
                         2 => KeyboardMode::Victus1Zone,
                         3 => KeyboardMode::PerKey,
+                        4 => KeyboardMode::DesktopRgb,
                         _ => detected,
                     };
                 }
@@ -51,7 +53,7 @@ fn get_zone_for_key(name: &str) -> i32 {
 
 // ── Color Popover Helper ───────────────────────────────────────
 #[allow(deprecated)]
-fn show_color_picker_popover(
+pub fn show_color_picker_popover(
     parent: &gtk::Button,
     on_color_selected: Rc<dyn Fn(String)>
 ) {
@@ -112,7 +114,7 @@ fn build_interactive_keyboard(
     detected_mode: KeyboardMode,
     zone_colors: Rc<RefCell<Vec<String>>>,
     per_key_colors: Rc<RefCell<Vec<String>>>
-) -> (gtk::Box, Rc<dyn Fn(&str, f64)>) {
+) -> (gtk::Box, Rc<dyn Fn(&str, f64)>, gtk::Box) {
     let kb_card = gtk::Box::builder()
         .orientation(gtk::Orientation::Vertical)
         .css_classes(["os-card"])
@@ -121,12 +123,12 @@ fn build_interactive_keyboard(
         .build();
 
     let layout = vec![
-        vec![("Esc", 1.0), ("F1", 1.0), ("F2", 1.0), ("F3", 1.0), ("F4", 1.0), ("F5", 1.0), ("F6", 1.0), ("F7", 1.0), ("F8", 1.0), ("F9", 1.0), ("F10", 1.0), ("F11", 1.0), ("F12", 1.0), ("PrtSc", 1.0), ("Del", 1.0)],
-        vec![("~", 1.0), ("1", 1.0), ("2", 1.0), ("3", 1.0), ("4", 1.0), ("5", 1.0), ("6", 1.0), ("7", 1.0), ("8", 1.0), ("9", 1.0), ("0", 1.0), ("-", 1.0), ("=", 1.0), ("Backspace", 2.0)],
-        vec![("Tab", 1.5), ("Q", 1.0), ("W", 1.0), ("E", 1.0), ("R", 1.0), ("T", 1.0), ("Y", 1.0), ("U", 1.0), ("I", 1.0), ("O", 1.0), ("P", 1.0), ("[", 1.0), ("]", 1.0), ("\\", 1.5)],
-        vec![("Caps", 1.8), ("A", 1.0), ("S", 1.0), ("D", 1.0), ("F", 1.0), ("G", 1.0), ("H", 1.0), ("J", 1.0), ("K", 1.0), ("L", 1.0), (";", 1.0), ("'", 1.0), ("Enter", 2.2)],
-        vec![("Shift", 2.4), ("Z", 1.0), ("X", 1.0), ("C", 1.0), ("V", 1.0), ("B", 1.0), ("N", 1.0), ("M", 1.0), (",", 1.0), (".", 1.0), ("/", 1.0), ("Shift_R", 2.6)],
-        vec![("Ctrl", 1.5), ("Win", 1.2), ("Alt", 1.2), ("Space", 6.0), ("Alt_R", 1.2), ("Fn", 1.2), ("Ctrl_R", 1.5), ("Left", 1.0), ("Up/Dn", 1.0), ("Right", 1.0)]
+        vec![("Esc", 1.0), ("F1", 1.0), ("F2", 1.0), ("F3", 1.0), ("F4", 1.0), ("F5", 1.0), ("F6", 1.0), ("F7", 1.0), ("F8", 1.0), ("F9", 1.0), ("F10", 1.0), ("F11", 1.0), ("F12", 1.0), ("PrtSc", 1.0), ("ScrLk", 1.0), ("Pause", 1.0)],
+        vec![("~", 1.0), ("1", 1.0), ("2", 1.0), ("3", 1.0), ("4", 1.0), ("5", 1.0), ("6", 1.0), ("7", 1.0), ("8", 1.0), ("9", 1.0), ("0", 1.0), ("-", 1.0), ("=", 1.0), ("Backspace", 2.0), ("Ins", 1.0), ("Home", 1.0), ("PgUp", 1.0), ("Num", 1.0), ("/", 1.0), ("*", 1.0), ("-", 1.0)],
+        vec![("Tab", 1.5), ("Q", 1.0), ("W", 1.0), ("E", 1.0), ("R", 1.0), ("T", 1.0), ("Y", 1.0), ("U", 1.0), ("I", 1.0), ("O", 1.0), ("P", 1.0), ("[", 1.0), ("]", 1.0), ("\\", 1.5), ("Del", 1.0), ("End", 1.0), ("PgDn", 1.0), ("7", 1.0), ("8", 1.0), ("9", 1.0), ("+", 1.0)],
+        vec![("Caps", 1.8), ("A", 1.0), ("S", 1.0), ("D", 1.0), ("F", 1.0), ("G", 1.0), ("H", 1.0), ("J", 1.0), ("K", 1.0), ("L", 1.0), (";", 1.0), ("'", 1.0), ("Enter", 2.2), ("4", 1.0), ("5", 1.0), ("6", 1.0)],
+        vec![("Shift", 2.4), ("Z", 1.0), ("X", 1.0), ("C", 1.0), ("V", 1.0), ("B", 1.0), ("N", 1.0), ("M", 1.0), (",", 1.0), (".", 1.0), ("/", 1.0), ("Shift_R", 2.6), ("Up", 1.0), ("1", 1.0), ("2", 1.0), ("3", 1.0), ("Ent", 1.0)],
+        vec![("Ctrl", 1.5), ("Win", 1.2), ("Alt", 1.2), ("Space", 6.0), ("Alt_R", 1.2), ("Fn", 1.2), ("Menu", 1.2), ("Ctrl_R", 1.5), ("Left", 1.0), ("Down", 1.0), ("Right", 1.0), ("0", 2.0), (".", 1.0)]
     ];
     let base_width = 38;
     let height = 36;
@@ -162,7 +164,6 @@ fn build_interactive_keyboard(
     }
     let key_colors = Rc::new(RefCell::new(HashMap::<String, String>::new()));
     
-    // -- Global Color Button --
     let global_color_box = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(12).margin_top(8).margin_bottom(12).halign(gtk::Align::Center).build();
     let global_color_label = gtk::Label::builder().label(i18n::t("kb_global_color")).css_classes(["dim-label"]).build();
     if global_color_label.label().is_empty() || global_color_label.label() == "kb_global_color" {
@@ -171,8 +172,51 @@ fn build_interactive_keyboard(
     let global_color_btn = gtk::Button::builder().width_request(40).height_request(24).build();
     global_color_btn.add_css_class("circular");
     global_color_btn.set_widget_name("global_color_btn");
+    
+    let c1_label = gtk::Label::builder().label(i18n::t("kb_color_1")).css_classes(["dim-label"]).build();
+    let c1_btn = gtk::Button::builder().width_request(40).height_request(24).build();
+    c1_btn.add_css_class("circular");
+    c1_btn.set_widget_name("c1_btn");
+
+    let c2_label = gtk::Label::builder().label(i18n::t("kb_color_2")).css_classes(["dim-label"]).build();
+    let c2_btn = gtk::Button::builder().width_request(40).height_request(24).build();
+    c2_btn.add_css_class("circular");
+    c2_btn.set_widget_name("c2_btn");
+
+    let c3_label = gtk::Label::builder().label(i18n::t("kb_color_3")).css_classes(["dim-label"]).build();
+    let c3_btn = gtk::Button::builder().width_request(40).height_request(24).build();
+    c3_btn.add_css_class("circular");
+    c3_btn.set_widget_name("c3_btn");
+
+    let c4_label = gtk::Label::builder().label(i18n::t("kb_color_4")).css_classes(["dim-label"]).build();
+    let c4_btn = gtk::Button::builder().width_request(40).height_request(24).build();
+    c4_btn.add_css_class("circular");
+    c4_btn.set_widget_name("c4_btn");
+
     global_color_box.append(&global_color_label);
     global_color_box.append(&global_color_btn);
+    
+    if detected_mode == KeyboardMode::Omen4Zone || detected_mode == KeyboardMode::PerKey {
+        global_color_box.append(&gtk::Separator::new(gtk::Orientation::Vertical));
+        global_color_box.append(&c1_label);
+        global_color_box.append(&c1_btn);
+        global_color_box.append(&c2_label);
+        global_color_box.append(&c2_btn);
+        global_color_box.append(&c3_label);
+        global_color_box.append(&c3_btn);
+        global_color_box.append(&c4_label);
+        global_color_box.append(&c4_btn);
+    }
+    
+    if detected_mode == KeyboardMode::PerKey {
+        let per_key_hint = gtk::Label::builder()
+            .label(i18n::t("per_key_hint"))
+            .css_classes(["os-section-desc"])
+            .margin_bottom(8)
+            .build();
+        kb_card.prepend(&per_key_hint);
+    }
+    
     kb_card.prepend(&global_color_box);
     
     let b_map_global = buttons_map.clone();
@@ -207,10 +251,12 @@ fn build_interactive_keyboard(
                     for (k, _) in b_map_local.borrow().iter() { kc_local.borrow_mut().insert(k.clone(), hex.clone()); }
                 }
                 KeyboardMode::PerKey => {
-                    for i in 0..pk_local.borrow().len() { pk_local.borrow_mut()[i] = hex.clone(); }
+                    let len = pk_local.borrow().len();
+                    for i in 0..len { pk_local.borrow_mut()[i] = hex.clone(); }
                     for (k, _) in b_map_local.borrow().iter() { kc_local.borrow_mut().insert(k.clone(), hex.clone()); }
                     crate::daemon_client::set_per_key_colors_sync(pk_local.borrow().clone());
                 }
+                KeyboardMode::DesktopRgb => {}
             }
             
             for (k, c) in kc_local.borrow().iter() {
@@ -219,6 +265,45 @@ fn build_interactive_keyboard(
                     css_str.push_str(&format!("#{} {{ background: {}; background-image: none; }}\n", wname.as_str(), c));
                 }
             }
+            dyn_local.load_from_string(&css_str);
+        }));
+    });
+
+    let dyn_prov_c1 = dyn_provider.clone();
+    c1_btn.connect_clicked(move |btn_ref| {
+        let dyn_local = dyn_prov_c1.clone();
+        show_color_picker_popover(btn_ref, Rc::new(move |hex| {
+            let css_str = format!("#c1_btn {{ background: {}; background-image: none; border: 1px solid rgba(255,255,255,0.4); }}\n", hex);
+            crate::daemon_client::set_color_sync(0, hex.clone());
+            dyn_local.load_from_string(&css_str);
+        }));
+    });
+
+    let dyn_prov_c2 = dyn_provider.clone();
+    c2_btn.connect_clicked(move |btn_ref| {
+        let dyn_local = dyn_prov_c2.clone();
+        show_color_picker_popover(btn_ref, Rc::new(move |hex| {
+            let css_str = format!("#c2_btn {{ background: {}; background-image: none; border: 1px solid rgba(255,255,255,0.4); }}\n", hex);
+            crate::daemon_client::set_color_sync(1, hex.clone());
+            dyn_local.load_from_string(&css_str);
+        }));
+    });
+    let dyn_prov_c3 = dyn_provider.clone();
+    c3_btn.connect_clicked(move |btn_ref| {
+        let dyn_local = dyn_prov_c3.clone();
+        show_color_picker_popover(btn_ref, Rc::new(move |hex| {
+            let css_str = format!("#c3_btn {{ background: {}; background-image: none; border: 1px solid rgba(255,255,255,0.4); }}\n", hex);
+            crate::daemon_client::set_color_sync(2, hex.clone());
+            dyn_local.load_from_string(&css_str);
+        }));
+    });
+
+    let dyn_prov_c4 = dyn_provider.clone();
+    c4_btn.connect_clicked(move |btn_ref| {
+        let dyn_local = dyn_prov_c4.clone();
+        show_color_picker_popover(btn_ref, Rc::new(move |hex| {
+            let css_str = format!("#c4_btn {{ background: {}; background-image: none; border: 1px solid rgba(255,255,255,0.4); }}\n", hex);
+            crate::daemon_client::set_color_sync(3, hex.clone());
             dyn_local.load_from_string(&css_str);
         }));
     });
@@ -283,6 +368,7 @@ fn build_interactive_keyboard(
                         }
                         crate::daemon_client::set_color_sync(zone_idx as i32, hex.clone());
                     }
+                    KeyboardMode::DesktopRgb => {}
                 }
                 
                 // Build dynamic CSS
@@ -349,7 +435,7 @@ fn build_interactive_keyboard(
         dyn_anim.load_from_string(&css);
     });
     
-    (kb_card, apply_anim)
+    (kb_card, apply_anim, global_color_box)
 }
 
 // ── OmenCore 4-Segment Lightbar Widget Builder ───────────────
@@ -482,7 +568,7 @@ fn build_interactive_lightbar(state_json_opt: &Option<serde_json::Value>) -> gtk
 
 use crate::i18n;
 
-pub fn build_page() -> adw::PreferencesPage {
+pub fn build_page() -> (adw::PreferencesPage, Option<adw::PreferencesGroup>, Option<adw::PreferencesGroup>) {
     let page = adw::PreferencesPage::builder().build();
     let specs = crate::daemon_client::get_hardware_specs_sync();
 
@@ -501,18 +587,43 @@ pub fn build_page() -> adw::PreferencesPage {
         state_json_opt = Some(state_json);
     }
 
-    let detected_mode = if is_per_key {
-        KeyboardMode::PerKey
-    } else if is_omen {
-        KeyboardMode::Omen4Zone
-    } else {
-        KeyboardMode::Victus1Zone
+    let mut zone_override = 0;
+    if let Ok(home) = std::env::var("HOME") {
+        let path = format!("{}/.config/omenspace/settings.json", home);
+        if let Ok(json_str) = std::fs::read_to_string(&path) {
+            if let Ok(json) = serde_json::from_str::<serde_json::Value>(&json_str) {
+                if let Some(zo) = json.get("zone_override").and_then(|v| v.as_u64()) {
+                    zone_override = zo;
+                }
+            }
+        }
+    }
+
+    let detected_mode = match zone_override {
+        4 => KeyboardMode::DesktopRgb,
+        3 => KeyboardMode::PerKey,
+        2 => KeyboardMode::Victus1Zone, // Single zone override
+        1 => KeyboardMode::Omen4Zone,   // 4-zone override
+        _ => {
+            // Auto detection (0 or unknown)
+            if specs.product_name.to_lowercase().contains("desktop") || specs.product_name.to_lowercase().contains("tower") {
+                KeyboardMode::DesktopRgb
+            } else if is_per_key {
+                KeyboardMode::PerKey
+            } else if is_omen {
+                KeyboardMode::Omen4Zone
+            } else {
+                KeyboardMode::Victus1Zone
+            }
+        }
     };
 
     // ── 1. Keyboard Lighting Group ────────────────────────────
     let std_group = adw::PreferencesGroup::builder()
         .title(i18n::t("kb_lighting_group"))
-        .description(if is_per_key {
+        .description(if detected_mode == KeyboardMode::DesktopRgb {
+            i18n::t("desktop_rgb_desc")
+        } else if is_per_key {
             i18n::t("omen_per_key_desc")
         } else if is_omen {
             i18n::t("omen_4zone_desc")
@@ -523,7 +634,9 @@ pub fn build_page() -> adw::PreferencesPage {
 
     let detected_row = adw::ActionRow::builder()
         .title(i18n::t("hw_arch"))
-        .subtitle(if is_per_key {
+        .subtitle(if detected_mode == KeyboardMode::DesktopRgb {
+            "OMEN Desktop RGB"
+        } else if is_per_key {
             "Omen Per-Key RGB"
         } else if is_omen {
             i18n::t("hw_arch_omen")
@@ -532,7 +645,7 @@ pub fn build_page() -> adw::PreferencesPage {
         })
         .build();
     let badge = gtk::Label::builder()
-        .label(if is_per_key { "Per-Key" } else if is_omen { i18n::t("badge_4zone") } else { i18n::t("badge_1zone") })
+        .label(if detected_mode == KeyboardMode::DesktopRgb { "Desktop" } else if is_per_key { "Per-Key" } else if is_omen { i18n::t("badge_4zone") } else { i18n::t("badge_1zone") })
         .css_classes(["badge-ok"])
         .valign(gtk::Align::Center)
         .build();
@@ -552,10 +665,10 @@ pub fn build_page() -> adw::PreferencesPage {
                 i18n::t("effect_breathing"), 
                 i18n::t("effect_blinking"), 
                 i18n::t("effect_cycle"), 
-                i18n::t("effect_wave_ltr"), 
-                i18n::t("effect_wave_rtl")
+                i18n::t("effect_wave_custom"), 
+                i18n::t("effect_wave_rainbow")
             ],
-            vec!["static", "breathing", "blinking", "cycle", "wave_ltr", "wave_rtl"]
+            vec!["static", "breathing", "blinking", "cycle", "wave", "wave_rainbow"]
         ),
         KeyboardMode::PerKey => (
             vec![
@@ -564,14 +677,25 @@ pub fn build_page() -> adw::PreferencesPage {
                 i18n::t("effect_breathing"),
                 i18n::t("effect_blinking"),
                 i18n::t("effect_cycle"),
-                i18n::t("effect_wave"),
+                i18n::t("effect_wave_custom"),
+                i18n::t("effect_wave_rainbow"),
                 i18n::t("effect_starlight"),
                 i18n::t("effect_marquee"),
                 i18n::t("effect_reactive"),
                 i18n::t("effect_ripple"),
                 i18n::t("effect_raindrop")
             ],
-            vec!["static", "per_key_custom", "breathing", "blinking", "cycle", "wave", "starlight", "marquee", "reactive", "ripple", "raindrop"]
+            vec!["static", "per_key_custom", "breathing", "blinking", "cycle", "wave", "wave_rainbow", "starlight", "marquee", "reactive", "ripple", "raindrop"]
+        ),
+        KeyboardMode::DesktopRgb => (
+            vec![
+                i18n::t("effect_static"),
+                i18n::t("effect_breathing"),
+                i18n::t("effect_cycle"),
+                i18n::t("effect_blinking"),
+                i18n::t("effect_wave"),
+            ],
+            vec!["static", "breathing", "cycle", "blinking", "wave"]
         ),
     };
     
@@ -613,11 +737,14 @@ pub fn build_page() -> adw::PreferencesPage {
     let apply_anim_rc: Rc<RefCell<Option<Rc<dyn Fn(&str, f64)>>>> = Rc::new(RefCell::new(None));
     let aa_hook = apply_anim_rc.clone();
     
+    let msl_c: Vec<String> = mode_str_list.iter().map(|s| s.to_string()).collect();
+    let msl_for_ae = mode_str_list.clone();
+    
     let apply_effect = move || {
         let idx = mode_row_clone.selected() as usize;
         let speed = speed_scale_clone.value();
-        if idx < mode_str_list.len() {
-            let m = mode_str_list[idx];
+        if idx < msl_for_ae.len() {
+            let m = msl_for_ae[idx];
             if m == "wave_ltr" {
                 crate::daemon_client::set_mode_sync("wave", speed as i32);
                 crate::daemon_client::set_global_sync(true, 100, "ltr");
@@ -674,12 +801,30 @@ pub fn build_page() -> adw::PreferencesPage {
         .description(i18n::t("kb_color_map_desc"))
         .build();
 
-    let zone_colors = Rc::new(RefCell::new(vec!["#0099ED".to_string(); 4]));
+    let zone_colors = Rc::new(RefCell::new(vec!["#0099ED".to_string(); 7]));
     let per_key_colors = Rc::new(RefCell::new(vec!["#0099ED".to_string(); 104]));
 
-    let (std_kb_grid, apply_anim) = build_interactive_keyboard(detected_mode, zone_colors.clone(), per_key_colors.clone());
+    let (std_kb_grid, apply_anim, global_color_box_ref) = if detected_mode == KeyboardMode::DesktopRgb {
+        crate::desktop_rgb_gui::build_desktop_rgb_card(zone_colors.clone())
+    } else {
+        build_interactive_keyboard(detected_mode, zone_colors.clone(), per_key_colors.clone())
+    };
     std_kb_group.add(&std_kb_grid);
     page.add(&std_kb_group);
+    
+    let mr_c = mode_row.clone();
+    let update_color_box_vis = move || {
+        let idx = mr_c.selected() as usize;
+        if idx < msl_c.len() {
+            let m = &msl_c[idx];
+            let show = m == "static" || m == "per_key_custom";
+            global_color_box_ref.set_visible(show);
+        }
+    };
+    let ucbv_rc = Rc::new(update_color_box_vis);
+    let u1 = ucbv_rc.clone();
+    mode_row.connect_selected_notify(move |_| u1());
+    ucbv_rc();
     
     *apply_anim_rc.borrow_mut() = Some(apply_anim.clone());
     
@@ -720,8 +865,11 @@ pub fn build_page() -> adw::PreferencesPage {
         }
     });
 
-    // ── 2. OmenCore Lightbar Group ────────────────────────────
-    if is_omen {
+    let mut lb_group_ret = None;
+    let mut lb_preview_group_ret = None;
+
+    let is_omen_brand = is_omen || detected_mode == KeyboardMode::DesktopRgb;
+    if is_omen_brand {
         let lb_group = adw::PreferencesGroup::builder()
             .title(i18n::t("lightbar_group"))
             .description(i18n::t("lightbar_desc"))
@@ -794,7 +942,24 @@ pub fn build_page() -> adw::PreferencesPage {
             lb_bright_row_c.set_visible(is_active);
             lb_preview_group_c.set_visible(is_active);
         });
+        let lb_prod_lower = specs.product_name.to_lowercase();
+        let mut show_lightbar = detected_mode == KeyboardMode::DesktopRgb || lb_prod_lower.contains("desktop") || lb_prod_lower.contains("transcend") || lb_prod_lower.contains("max");
+        if let Ok(home) = std::env::var("HOME") {
+            let path = format!("{}/.config/omenspace/settings.json", home);
+            if let Ok(json_str) = std::fs::read_to_string(&path) {
+                if let Ok(json) = serde_json::from_str::<serde_json::Value>(&json_str) {
+                    if let Some(lb) = json.get("lightbar_enabled").and_then(|v| v.as_bool()) {
+                        show_lightbar = lb;
+                    }
+                }
+            }
+        }
+        lb_group.set_visible(show_lightbar);
+        lb_preview_group.set_visible(show_lightbar);
+
+        lb_group_ret = Some(lb_group);
+        lb_preview_group_ret = Some(lb_preview_group);
     }
 
-    page
+    (page, lb_group_ret, lb_preview_group_ret)
 }

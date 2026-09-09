@@ -159,7 +159,7 @@ impl MuxService {
 impl MuxService {
     /// SetGpuMode — mirrors Python MUXService.SetGpuMode().
     async fn set_gpu_mode(&self, mode: String) -> String {
-        let valid = ["hybrid", "discrete"];
+        let valid = ["hybrid", "discrete", "advanced"];
         if !valid.contains(&mode.as_str()) {
             return "FAIL".to_string();
         }
@@ -169,7 +169,7 @@ impl MuxService {
             return "Error: WMI MUX interface not found".to_string();
         }
 
-        let val = if mode == "discrete" { "1" } else { "0" };
+        let val = if mode == "discrete" { "1" } else if mode == "advanced" { "2" } else { "0" };
         if tokio::fs::write(HP_WMI_GRAPHICS_MODE_PATH, val).await.is_ok() {
             {
                 let mut g = self.inner.lock().await;

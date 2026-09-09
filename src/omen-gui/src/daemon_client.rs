@@ -318,7 +318,10 @@ pub async fn get_diagnostics_async() -> Result<String, Box<dyn std::error::Error
 pub fn get_diagnostics_sync() -> SystemStats {
     let rt = get_runtime();
     let json_str = rt.block_on(async {
-        get_diagnostics_async().await.unwrap_or_else(|_| "{}".to_string())
+        match tokio::time::timeout(std::time::Duration::from_millis(500), get_diagnostics_async()).await {
+            Ok(Ok(s)) => s,
+            _ => "{}".to_string()
+        }
     });
     serde_json::from_str(&json_str).unwrap_or_default()
 }
@@ -338,7 +341,7 @@ where
     });
 
     let senders = TELEMETRY_SENDERS.get_or_init(|| std::sync::Mutex::new(Vec::new()));
-    senders.lock().unwrap().push(tx);
+    senders.lock().unwrap_or_else(|e| e.into_inner()).push(tx);
 
     if !TELEMETRY_STARTED.swap(true, std::sync::atomic::Ordering::SeqCst) {
         let rt = get_runtime();
@@ -352,7 +355,7 @@ where
                                 let json_str = args.json_stats();
                                 if let Ok(stats) = serde_json::from_str::<SystemStats>(json_str) {
                                     if let Some(mutex) = TELEMETRY_SENDERS.get() {
-                                        let senders = mutex.lock().unwrap();
+                                        let senders = mutex.lock().unwrap_or_else(|e| e.into_inner());
                                         for tx in senders.iter() {
                                             let _ = tx.send(stats.clone());
                                         }
@@ -393,7 +396,10 @@ pub async fn generate_rgb_issue_async() -> Result<String, Box<dyn std::error::Er
 pub fn get_hardware_specs_sync() -> HardwareSpecs {
     let rt = get_runtime();
     let json_str = rt.block_on(async {
-        get_hardware_specs_async().await.unwrap_or_else(|_| "{}".to_string())
+        match tokio::time::timeout(std::time::Duration::from_millis(500), get_hardware_specs_async()).await {
+            Ok(Ok(s)) => s,
+            _ => "{}".to_string()
+        }
     });
     let mut specs: HardwareSpecs = match serde_json::from_str(&json_str) {
         Ok(s) => s,
@@ -434,7 +440,10 @@ pub async fn get_power_profile_async() -> Result<String, Box<dyn std::error::Err
 pub fn get_power_profile_sync() -> String {
     let rt = get_runtime();
     rt.block_on(async {
-        get_power_profile_async().await.unwrap_or_else(|_| "balanced".to_string())
+        match tokio::time::timeout(std::time::Duration::from_millis(500), get_power_profile_async()).await {
+            Ok(Ok(s)) => s,
+            _ => "balanced".to_string()
+        }
     })
 }
 
@@ -448,7 +457,10 @@ pub async fn get_fan_mode_async() -> Result<String, Box<dyn std::error::Error>> 
 pub fn get_fan_mode_sync() -> String {
     let rt = get_runtime();
     rt.block_on(async {
-        get_fan_mode_async().await.unwrap_or_else(|_| "auto".to_string())
+        match tokio::time::timeout(std::time::Duration::from_millis(500), get_fan_mode_async()).await {
+            Ok(Ok(s)) => s,
+            _ => "auto".to_string()
+        }
     })
 }
 
@@ -535,9 +547,9 @@ pub async fn get_rgb_state_async() -> Result<String, Box<dyn std::error::Error>>
 pub fn get_rgb_state_sync() -> String {
     let rt = get_runtime();
     rt.block_on(async {
-        match get_rgb_state_async().await {
-            Ok(s) => s,
-            Err(_) => "{}".to_string()
+        match tokio::time::timeout(std::time::Duration::from_millis(500), get_rgb_state_async()).await {
+            Ok(Ok(s)) => s,
+            _ => "{}".to_string()
         }
     })
 }
@@ -546,7 +558,10 @@ pub fn get_rgb_state_sync() -> String {
 pub fn ping_daemon_sync() -> bool {
     let rt = get_runtime();
     rt.block_on(async {
-        get_fan_mode_async().await.is_ok()
+        match tokio::time::timeout(std::time::Duration::from_millis(500), get_fan_mode_async()).await {
+            Ok(Ok(_)) => true,
+            _ => false
+        }
     })
 }
 

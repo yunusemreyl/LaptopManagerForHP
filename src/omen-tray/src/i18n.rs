@@ -13,15 +13,6 @@ pub enum Language {
     En,
 }
 
-impl Language {
-    pub fn to_code(&self) -> &'static str {
-        match self {
-            Language::Auto => "auto",
-            Language::Tr => "tr",
-            Language::En => "en",
-        }
-    }
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct GuiConfig {

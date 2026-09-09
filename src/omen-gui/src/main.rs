@@ -13,6 +13,7 @@ mod undervolt;
 mod mux;
 mod keyboardrgb;
 mod settings;
+mod desktop_rgb_gui;
 mod updater;
 mod daemon_client;
 mod asset_resolver;
@@ -174,21 +175,6 @@ fn render_ui(window: &adw::ApplicationWindow, initial_page: &str) {
         .transition_type(gtk::StackTransitionType::Crossfade)
         .build();
 
-    // Title label for the content page
-    let content_title = gtk::Label::builder()
-        .label(match initial_page {
-            "undervolt" => i18n::t("title_undervolt"),
-            "mux" => i18n::t("title_mux"),
-            "monitoring" => i18n::t("title_monitoring"),
-            "rgb" => i18n::t("title_lighting"),
-            "appprof" => i18n::t("title_app_profiles"),
-            "updater" => i18n::t("title_updater"),
-            "settings" => i18n::t("title_settings"),
-            _ => i18n::t("title_performance"),
-        })
-        .css_classes(["title"])
-        .build();
-
     // Sidebar list
     let sidebar_list = gtk::ListBox::builder()
         .css_classes(["navigation-sidebar"])
@@ -224,7 +210,15 @@ fn render_ui(window: &adw::ApplicationWindow, initial_page: &str) {
     page_mux.set_margin_end(m);
     page_mux.set_margin_bottom(m);
 
-    let mon_box = gtk::Box::builder()
+    let mon_hdr = gtk::Box::builder()
+        .orientation(gtk::Orientation::Vertical)
+        .spacing(4)
+        .margin_bottom(12)
+        .build();
+    mon_hdr.append(&gtk::Label::builder().label(i18n::t("title_monitoring")).css_classes(["page-title"]).halign(gtk::Align::Start).build());
+    mon_hdr.append(&gtk::Label::builder().label(i18n::t("monitoring_desc")).css_classes(["os-section-desc"]).halign(gtk::Align::Start).build());
+    
+    let mon_content = gtk::Box::builder()
         .orientation(gtk::Orientation::Vertical)
         .spacing(10)
         .margin_top(20)
@@ -232,9 +226,24 @@ fn render_ui(window: &adw::ApplicationWindow, initial_page: &str) {
         .margin_end(20)
         .margin_bottom(20)
         .build();
-    mon_box.append(&monitoring::build_page(false));
+    mon_content.append(&mon_hdr);
+    mon_content.append(&monitoring::build_page(false));
 
-    let page_rgb = keyboardrgb::build_page();
+    let rgb_hdr = gtk::Box::builder()
+        .orientation(gtk::Orientation::Vertical)
+        .spacing(4)
+        .margin_bottom(12)
+        .build();
+    rgb_hdr.append(&gtk::Label::builder().label(i18n::t("title_lighting")).css_classes(["page-title"]).halign(gtk::Align::Start).build());
+    rgb_hdr.append(&gtk::Label::builder().label(i18n::t("lighting_desc")).css_classes(["os-section-desc"]).halign(gtk::Align::Start).build());
+
+    let (page_rgb_content, lb_group_opt, lb_preview_group_opt) = keyboardrgb::build_page();
+    let page_rgb = gtk::Box::builder()
+        .orientation(gtk::Orientation::Vertical)
+        .build();
+    page_rgb.append(&rgb_hdr);
+    page_rgb.append(&page_rgb_content);
+    
     page_rgb.set_margin_top(m);
     page_rgb.set_margin_start(m);
     page_rgb.set_margin_end(m);
@@ -246,7 +255,7 @@ fn render_ui(window: &adw::ApplicationWindow, initial_page: &str) {
         render_ui(&win_clone, "settings");
     });
 
-    let page_settings = settings::build_page(&window, Some(on_lang_changed));
+    let page_settings = settings::build_page(&window, Some(on_lang_changed), lb_group_opt, lb_preview_group_opt);
     page_settings.set_margin_top(m);
     page_settings.set_margin_start(m);
     page_settings.set_margin_end(m);
@@ -267,7 +276,7 @@ fn render_ui(window: &adw::ApplicationWindow, initial_page: &str) {
     stack.add_named(&gen_box, Some("performance"));
     stack.add_named(&page_undervolt, Some("undervolt"));
     stack.add_named(&page_mux, Some("mux"));
-    stack.add_named(&mon_box, Some("monitoring"));
+    stack.add_named(&mon_content, Some("monitoring"));
     stack.add_named(&page_rgb, Some("rgb"));
     stack.add_named(&page_app_profiles, Some("appprof"));
     stack.add_named(&page_updater, Some("updater"));
@@ -280,24 +289,14 @@ fn render_ui(window: &adw::ApplicationWindow, initial_page: &str) {
         .active(true)
         .build();
 
-    let content_header = adw::HeaderBar::builder()
-        .title_widget(&content_title)
-        .build();
-    content_header.pack_start(&toggle_sidebar_btn);
-
     let content_box = gtk::Box::builder().orientation(gtk::Orientation::Vertical).build();
-    content_box.append(&content_header);
+    
     let scroll = gtk::ScrolledWindow::builder()
         .vexpand(true)
         .hscrollbar_policy(gtk::PolicyType::Never)
         .child(&stack)
         .build();
     content_box.append(&scroll);
-
-    let content_page = adw::NavigationPage::builder()
-        .title(i18n::t("app_title"))
-        .child(&content_box)
-        .build();
 
     let tabs = [
         ("omen-performance-symbolic", i18n::t("nav_performance"), "performance"),
@@ -309,18 +308,28 @@ fn render_ui(window: &adw::ApplicationWindow, initial_page: &str) {
         ("omen-updater-symbolic", i18n::t("nav_updater"), "updater"),
     ];
 
+    let mut sidebar_labels = Vec::new();
+    
     for (icon_name, tab_name, page_name) in tabs.iter() {
         let row = gtk::ListBoxRow::builder().build();
         let box_ = gtk::Box::builder()
             .orientation(gtk::Orientation::Horizontal)
-            .spacing(12)
+            .spacing(0)
             .margin_start(12)
             .margin_end(12)
             .margin_top(11)
             .margin_bottom(11)
             .build();
         box_.append(&gtk::Image::builder().icon_name(*icon_name).pixel_size(18).build());
-        box_.append(&gtk::Label::builder().label(*tab_name).build());
+        let label = gtk::Label::builder().label(*tab_name).margin_start(12).build();
+        let revealer = gtk::Revealer::builder()
+            .transition_type(gtk::RevealerTransitionType::SlideRight)
+            .reveal_child(true)
+            .transition_duration(250)
+            .child(&label)
+            .build();
+        sidebar_labels.push(revealer.clone());
+        box_.append(&revealer);
         row.set_child(Some(&box_));
         row.set_widget_name(*page_name);
         sidebar_list.append(&row);
@@ -334,14 +343,22 @@ fn render_ui(window: &adw::ApplicationWindow, initial_page: &str) {
     let settings_row = gtk::ListBoxRow::builder().name("settings").build();
     let s_box = gtk::Box::builder()
         .orientation(gtk::Orientation::Horizontal)
-        .spacing(12)
+        .spacing(0)
         .margin_start(12)
         .margin_end(12)
         .margin_top(11)
         .margin_bottom(11)
         .build();
     s_box.append(&gtk::Image::builder().icon_name("omen-settings-symbolic").pixel_size(18).build());
-    s_box.append(&gtk::Label::builder().label(i18n::t("nav_settings")).build());
+    let settings_label = gtk::Label::builder().label(i18n::t("nav_settings")).margin_start(12).build();
+    let s_revealer = gtk::Revealer::builder()
+        .transition_type(gtk::RevealerTransitionType::SlideRight)
+        .reveal_child(true)
+        .transition_duration(250)
+        .child(&settings_label)
+        .build();
+    sidebar_labels.push(s_revealer.clone());
+    s_box.append(&s_revealer);
     settings_row.set_child(Some(&s_box));
     bottom_list.append(&settings_row);
 
@@ -366,37 +383,22 @@ fn render_ui(window: &adw::ApplicationWindow, initial_page: &str) {
     }
 
     let stack_clone = stack.clone();
-    let title_clone = content_title.clone();
     let bottom_list_clone = bottom_list.clone();
     sidebar_list.connect_row_selected(move |_list, row_opt| {
         if let Some(row) = row_opt {
             bottom_list_clone.unselect_all(); // Mutual exclusion
             let page_name = row.widget_name().to_string();
             stack_clone.set_visible_child_name(&page_name);
-            match page_name.as_str() {
-                "performance" => title_clone.set_label(i18n::t("title_performance")),
-                "undervolt" => title_clone.set_label(i18n::t("title_undervolt")),
-                "mux" => title_clone.set_label(i18n::t("title_mux")),
-                "monitoring" => title_clone.set_label(i18n::t("title_monitoring")),
-                "rgb" => title_clone.set_label(i18n::t("title_lighting")),
-                "appprof" => title_clone.set_label(i18n::t("title_app_profiles")),
-                "updater" => title_clone.set_label(i18n::t("title_updater")),
-                _ => {}
-            }
         }
     });
 
     let stack_clone2 = stack.clone();
-    let title_clone2 = content_title.clone();
     let sidebar_list_clone2 = sidebar_list.clone();
     bottom_list.connect_row_selected(move |_list, row_opt| {
         if let Some(row) = row_opt {
             sidebar_list_clone2.unselect_all(); // Mutual exclusion
             let page_name = row.widget_name().to_string();
             stack_clone2.set_visible_child_name(&page_name);
-            if page_name == "settings" {
-                title_clone2.set_label(i18n::t("title_settings"));
-            }
         }
     });
 
@@ -408,42 +410,42 @@ fn render_ui(window: &adw::ApplicationWindow, initial_page: &str) {
         .build();
     window.set_icon_name(Some("omenspace"));
     header_logo_box.append(&gtk::Image::builder().icon_name("omenspace").pixel_size(24).build());
-    header_logo_box.append(&gtk::Label::builder().label(i18n::t("app_title")).css_classes(["title"]).build());
+    header_logo_box.append(&gtk::Label::builder().label("OMEN SPACE").css_classes(["title"]).build());
 
-    let sidebar_header = adw::HeaderBar::builder().title_widget(&header_logo_box).build();
+    let global_header = adw::HeaderBar::builder().title_widget(&header_logo_box).build();
+    global_header.pack_start(&toggle_sidebar_btn);
+
     let sidebar_box = gtk::Box::builder()
         .orientation(gtk::Orientation::Vertical)
         .css_classes(["os-sidebar-box"])
-        .width_request(220)
         .build();
-    sidebar_box.append(&sidebar_header);
     sidebar_box.append(&sidebar_list);
     
     let spacer = gtk::Box::builder().vexpand(true).build();
     sidebar_box.append(&spacer);
     sidebar_box.append(&bottom_list);
 
-    let sidebar_page = adw::NavigationPage::builder()
-        .title(i18n::t("menu"))
-        .child(&sidebar_box)
-        .width_request(220)
-        .build();
+    let main_hbox = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).build();
+    main_hbox.append(&sidebar_box);
+    main_hbox.append(&gtk::Separator::new(gtk::Orientation::Vertical));
+    
+    content_box.set_hexpand(true);
+    main_hbox.append(&content_box);
 
-    let split_view = adw::OverlaySplitView::builder()
-        .sidebar(&sidebar_page)
-        .content(&content_page)
-        .min_sidebar_width(220.0)
-        .max_sidebar_width(220.0)
-        .sidebar_width_fraction(0.0)
-        .pin_sidebar(true)
+    let toolbar_view = adw::ToolbarView::builder()
+        .content(&main_hbox)
         .build();
+    toolbar_view.add_top_bar(&global_header);
 
     toggle_sidebar_btn.connect_toggled({
-        let split_view = split_view.clone();
+        let _sidebar_box = sidebar_box.clone();
         move |btn| {
-            split_view.set_property("show-sidebar", btn.is_active());
+            let is_active = btn.is_active();
+            for revealer in &sidebar_labels {
+                revealer.set_reveal_child(is_active);
+            }
         }
     });
 
-    window.set_content(Some(&split_view));
+    window.set_content(Some(&toolbar_view));
 }

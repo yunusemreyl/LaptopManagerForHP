@@ -15,3 +15,4 @@ evdev = { version = "0.12", features = ["tokio"] }
 lazy_static = "1.4"
 futures = "0.3.34"
 nvml-wrapper = "0.13.0"
+hidapi = "2.6.7"

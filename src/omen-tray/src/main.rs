@@ -316,6 +316,16 @@ trait Mux {
     async fn get_gpu_info(&self) -> zbus::Result<String>;
 }
 
+#[zbus::proxy(
+    interface = "org.hp.omen.Platform",
+    default_service = "org.hp.omen",
+    default_path = "/org/hp/omen/Platform"
+)]
+trait Platform {
+    #[zbus(signal)]
+    async fn macro_key_pressed(&self, key_name: &str) -> zbus::Result<()>;
+}
+
 async fn get_conn() -> ZbusResult<Connection> {
     Connection::system().await
 }
@@ -436,6 +446,25 @@ async fn main() {
     let service = ksni::TrayService::new(tray);
     let handle = service.handle();
     service.spawn();
+
+    // Listen for OMEN key presses from the zero-overhead hotkey monitor
+    tokio::spawn(async move {
+        if let Ok(conn) = get_conn().await {
+            use futures::StreamExt;
+            if let Ok(proxy) = PlatformProxy::new(&conn).await {
+                if let Ok(mut stream) = proxy.receive_macro_key_pressed().await {
+                    while let Some(msg) = stream.next().await {
+                        if let Ok(args) = msg.args() {
+                            if *args.key_name() == "omen" {
+                                info!("OMEN tuşu algılandı, GUI başlatılıyor/kapatılıyor...");
+                                spawn_gui();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    });
 
     loop {
         tokio::time::sleep(std::time::Duration::from_secs(3)).await;

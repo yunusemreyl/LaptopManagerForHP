@@ -366,7 +366,7 @@ pub fn fetch_system_stats() -> SystemStats {
                     let idle = parts[3] + parts.get(4).unwrap_or(&0); // idle + iowait
                     let total: u64 = parts.iter().sum();
                     
-                    let mut prev_guard = PREV_JIFFIES.lock().unwrap();
+                    let mut prev_guard = PREV_JIFFIES.lock().unwrap_or_else(|e| e.into_inner());
                     if let Some(ref prev) = *prev_guard {
                         let total_diff = total.saturating_sub(prev.total);
                         let idle_diff = idle.saturating_sub(prev.idle);
@@ -429,7 +429,7 @@ pub fn fetch_system_stats() -> SystemStats {
         if let Ok(s) = fs::read_to_string(p) {
             if let Ok(energy) = s.trim().parse::<u64>() {
                 let now = std::time::Instant::now();
-                let mut prev_guard = PREV_RAPL.lock().unwrap();
+                let mut prev_guard = PREV_RAPL.lock().unwrap_or_else(|e| e.into_inner());
                 if let Some(ref prev) = *prev_guard {
                     let elapsed = now.duration_since(prev.time).as_secs_f64();
                     if elapsed > 0.0 {

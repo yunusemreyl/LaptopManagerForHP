@@ -117,8 +117,10 @@ pub fn show_fan_curve_editor(
             let (x, y) = to_canvas(p.0, p.1);
             cr.line_to(x, y);
         }
-        let (xl, _) = to_canvas(pts.last().unwrap().0, pts.last().unwrap().1);
-        cr.line_to(xl, pad + ah);
+        if let Some(last) = pts.last() {
+            let (xl, _) = to_canvas(last.0, last.1);
+            cr.line_to(xl, pad + ah);
+        }
         cr.close_path();
         cr.set_source_rgba(r, g, b, 0.10);
         let _ = cr.fill();

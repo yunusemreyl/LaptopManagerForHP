@@ -8,7 +8,7 @@ use crate::i18n::{self, Language};
    settings.rs — Application & daemon settings
    ───────────────────────────────────────────────────────────── */
 
-pub fn build_page(window: &adw::ApplicationWindow, on_lang_changed: Option<Rc<dyn Fn()>>) -> gtk::Box {
+pub fn build_page(window: &adw::ApplicationWindow, on_lang_changed: Option<Rc<dyn Fn()>>, lb_group_opt: Option<adw::PreferencesGroup>, lb_preview_group_opt: Option<adw::PreferencesGroup>) -> gtk::Box {
     let mut init_hb = 30.0;
     let mut init_auto = true;
     let mut init_startup_profile = 0u32;
@@ -16,7 +16,10 @@ pub fn build_page(window: &adw::ApplicationWindow, on_lang_changed: Option<Rc<dy
     let mut init_thermal_alerts = true;
     let mut init_zone_override = 0u32;
     let mut init_appearance_mode = 0u32;
-    let mut init_lightbar = true;
+    
+    let specs = crate::daemon_client::get_hardware_specs_sync();
+    let prod_lower = specs.product_name.to_lowercase();
+    let mut init_lightbar = prod_lower.contains("desktop") || prod_lower.contains("transcend") || prod_lower.contains("max");
 
     if let Ok(home) = std::env::var("HOME") {
         let path = format!("{}/.config/omenspace/settings.json", home);
@@ -67,6 +70,7 @@ pub fn build_page(window: &adw::ApplicationWindow, on_lang_changed: Option<Rc<dy
         i18n::t("zone_4zone"),
         i18n::t("zone_single"),
         i18n::t("zone_perkey"),
+        i18n::t("zone_desktop"),
     ]);
     let zone_override_row = adw::ComboRow::builder()
         .title(i18n::t("zone_override"))
@@ -136,6 +140,7 @@ pub fn build_page(window: &adw::ApplicationWindow, on_lang_changed: Option<Rc<dy
     lang_row.set_selected(i18n::get_selected_language().to_index());
 
     let on_lang_changed_clone = on_lang_changed.clone();
+    let on_lang_changed_clone_zone = on_lang_changed.clone();
     lang_row.connect_selected_notify(move |row| {
         let idx = row.selected();
         let selected_lang = Language::from_index(idx);
@@ -279,12 +284,23 @@ pub fn build_page(window: &adw::ApplicationWindow, on_lang_changed: Option<Rc<dy
     });
     
     let s6 = save_settings_rc.clone();
-    zone_override_row.connect_selected_notify(move |_| s6());
+    zone_override_row.connect_selected_notify(move |_| {
+        s6();
+        if let Some(cb) = &on_lang_changed_clone_zone {
+            cb();
+        }
+    });
     
     let s7 = save_settings_rc.clone();
     lightbar_row.connect_active_notify(move |r| {
         s7();
-        crate::daemon_client::set_global_sync(r.is_active(), 100, "ltr");
+        let is_active = r.is_active();
+        if let Some(grp) = &lb_group_opt {
+            grp.set_visible(is_active);
+        }
+        if let Some(pgrp) = &lb_preview_group_opt {
+            pgrp.set_visible(is_active);
+        }
     });
     
     page.append(&perf_group);

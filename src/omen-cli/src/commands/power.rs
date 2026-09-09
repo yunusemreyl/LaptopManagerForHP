@@ -23,7 +23,7 @@ pub enum PowerCommand {
     Undervolt {
         mv: i32,
     },
-    /// Set GPU Mux mode (hybrid, discrete)
+    /// Set GPU Mux mode (hybrid, discrete, advanced)
     SetMux {
         mode: String,
     },
@@ -48,8 +48,13 @@ pub async fn handle(cmd: &PowerCommand, conn: &Connection) -> Result<()> {
             println!("Response: {}", res);
         }
         PowerCommand::SetMux { mode } => {
+            let mode_lower = mode.to_lowercase();
+            if mode_lower != "hybrid" && mode_lower != "discrete" && mode_lower != "advanced" {
+                eprintln!("{} {}", crate::i18n::t("mux_invalid"), mode);
+                std::process::exit(1);
+            }
             let mux_proxy = MuxProxy::new(conn).await?;
-            let res = mux_proxy.set_gpu_mode(mode).await?;
+            let res = mux_proxy.set_gpu_mode(&mode_lower).await?;
             println!("Response: {}", res);
         }
         PowerCommand::Info => {

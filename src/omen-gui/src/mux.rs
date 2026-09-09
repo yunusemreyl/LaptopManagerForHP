@@ -101,7 +101,16 @@ pub fn build_page() -> gtk::Box {
         i18n::t("discrete_desc"),
     );
 
+    // 3. Advanced Card
+    let (btn_advanced, wrap_advanced) = build_simple_mux_card(
+        &crate::asset_resolver::get_asset_path("omen-gpu-symbolic.svg"),
+        i18n::t("advanced_title"),
+        i18n::t("advanced_mode"),
+        i18n::t("advanced_desc"),
+    );
+
     btn_discrete.set_group(Some(&btn_hybrid));
+    btn_advanced.set_group(Some(&btn_hybrid));
     if is_discrete_active {
         btn_discrete.set_active(true);
     } else {
@@ -110,6 +119,7 @@ pub fn build_page() -> gtk::Box {
 
     modes_box.append(&wrap_hybrid);
     modes_box.append(&wrap_discrete);
+    modes_box.append(&wrap_advanced);
     page.append(&modes_box);
 
     // ── Reboot Warning Card ───────────────────────────────────
@@ -150,6 +160,11 @@ pub fn build_page() -> gtk::Box {
         .css_classes(["suggested-action"])
         .valign(gtk::Align::Center)
         .build();
+    
+    reboot_btn.connect_clicked(|_| {
+        let _ = std::process::Command::new("systemctl").arg("reboot").spawn();
+    });
+
     warn_card.append(&reboot_btn);
     page.append(&warn_card);
 
@@ -227,14 +242,28 @@ pub fn build_page() -> gtk::Box {
         }
     });
 
+    let w_c3 = warn_card.clone();
+    let d_val3 = disp_val.clone();
+    btn_advanced.connect_toggled(move |btn| {
+        if btn.is_active() {
+            crate::daemon_client::set_gpu_mode_sync("advanced".to_string());
+            w_c3.set_visible(true);
+            d_val3.set_label(&format!("eDP-1 → {} (Advanced)", "Dynamic"));
+            d_val3.set_css_classes(&["badge-ok"]);
+        }
+    });
+
     let bd_load = btn_discrete.clone();
     let bh_load = btn_hybrid.clone();
+    let ba_load = btn_advanced.clone();
     glib::spawn_future_local(async move {
         if let Ok(json) = crate::daemon_client::get_gpu_info_async().await {
             if let Ok(info) = serde_json::from_str::<serde_json::Value>(&json) {
                 if let Some(mode) = info.get("mode").and_then(|v| v.as_str()) {
                     if mode == "discrete" {
                         bd_load.set_active(true);
+                    } else if mode == "advanced" {
+                        ba_load.set_active(true);
                     } else if mode == "hybrid" {
                         bh_load.set_active(true);
                     }

@@ -15,14 +15,14 @@ install_dependencies() {
     echo "====================================="
     if command -v dnf &> /dev/null; then
         echo "Detected Fedora/RHEL. Installing dependencies via dnf..."
-        dnf install -y rust cargo gcc pkgconf-pkg-config gtk4-devel libadwaita-devel systemd-devel make kernel-devel kernel-headers dbus-devel dkms
+        dnf install -y gcc pkgconf-pkg-config gtk4-devel libadwaita-devel systemd-devel make kernel-devel kernel-headers dbus-devel dkms
     elif command -v apt-get &> /dev/null; then
         echo "Detected Debian/Ubuntu. Installing dependencies via apt..."
         apt-get update
-        apt-get install -y cargo rustc build-essential pkg-config libgtk-4-dev libadwaita-1-dev libsystemd-dev libdbus-1-dev dkms linux-headers-$(uname -r)
+        apt-get install -y build-essential pkg-config libgtk-4-dev libadwaita-1-dev libsystemd-dev libdbus-1-dev dkms linux-headers-$(uname -r)
     elif command -v pacman &> /dev/null; then
         echo "Detected Arch Linux. Installing dependencies via pacman..."
-        local ARCH_PKGS=(rust gcc pkgconf gtk4 libadwaita systemd dbus base-devel dkms)
+        local ARCH_PKGS=(gcc pkgconf gtk4 libadwaita systemd dbus base-devel dkms)
 
         # Only install headers if not already available for the running kernel
         if [ ! -d "/lib/modules/$(uname -r)/build" ] && [ ! -d "/usr/lib/modules/$(uname -r)/build" ]; then
@@ -61,9 +61,9 @@ install_dependencies() {
         pacman -S --needed --noconfirm "${ARCH_PKGS[@]}"
     elif command -v zypper &> /dev/null; then
         echo "Detected openSUSE. Installing dependencies via zypper..."
-        zypper install -y rust cargo gcc make pkgconfig gtk4-devel libadwaita-devel systemd-devel dbus-1-devel kernel-devel dkms
+        zypper install -y gcc make pkgconfig gtk4-devel libadwaita-devel systemd-devel dbus-1-devel kernel-devel dkms
     else
-        echo "Warning: Unsupported package manager. Please ensure rust, cargo, gtk4, and libadwaita dev packages are installed."
+        echo "Warning: Unsupported package manager. Please ensure gcc, make, pkgconfig, gtk4, and libadwaita dev packages are installed."
     fi
 }
 
@@ -168,6 +168,20 @@ do_build() {
     echo "====================================="
     export CARGO_HOME=/root/.cargo
     export RUSTUP_HOME=/root/.rustup
+    
+    # Check for cargo, instruct user to install rustup if missing
+    if ! command -v cargo &> /dev/null; then
+        if [[ -n "$SUDO_USER" ]] && su - "$SUDO_USER" -c "command -v cargo" &> /dev/null; then
+            echo "cargo found for user $SUDO_USER, proceeding with build..."
+        else
+            echo "Error: 'cargo' is not installed or not in PATH."
+            echo "Please install Rust using rustup:"
+            echo "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh"
+            echo "After installation, restart your terminal and run setup.sh again."
+            exit 1
+        fi
+    fi
+
     if ! command -v cargo &> /dev/null; then
         echo "cargo not found for root. Attempting to build as SUDO_USER if available..."
         if [[ -n "$SUDO_USER" ]]; then

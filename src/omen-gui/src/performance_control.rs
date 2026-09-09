@@ -17,8 +17,8 @@ pub fn build_page() -> gtk::Box {
         .margin_bottom(2)
         .build();
     header_row.append(&gtk::Label::builder()
-        .label(i18n::t("system_profiles"))
-        .css_classes(["os-section-header"])
+        .label(i18n::t("title_performance"))
+        .css_classes(["page-title"])
         .halign(gtk::Align::Start)
         .hexpand(true)
         .build());
@@ -301,6 +301,8 @@ pub fn build_page() -> gtk::Box {
         let _ = cr.show_text("TEMP °C");
 
         // Fill under curve
+        if pts.is_empty() { return; }
+        
         let (x0, y0) = to_canvas(pts[0].0, pts[0].1);
         cr.move_to(x0, pad + ah);
         cr.line_to(x0, y0);
@@ -308,8 +310,10 @@ pub fn build_page() -> gtk::Box {
             let (x, y) = to_canvas(p.0, p.1);
             cr.line_to(x, y);
         }
-        let (xl, _) = to_canvas(pts.last().unwrap().0, pts.last().unwrap().1);
-        cr.line_to(xl, pad + ah);
+        if let Some(last) = pts.last() {
+            let (xl, _) = to_canvas(last.0, last.1);
+            cr.line_to(xl, pad + ah);
+        }
         cr.close_path();
         cr.set_source_rgba(r, g, b, 0.10);
         let _ = cr.fill();

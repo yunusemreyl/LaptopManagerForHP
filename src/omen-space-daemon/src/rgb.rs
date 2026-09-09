@@ -78,7 +78,7 @@ impl RgbHardware {
         let Some(ref base) = self.driver_path else { return; };
         if zone > 7 { return; }
 
-        let actual_zone = if zone <= 3 { 3 - zone } else { zone };
+        let actual_zone = zone;
 
         let filename = if self.is_new_driver {
             format!("zone{:02}", actual_zone)
@@ -377,6 +377,7 @@ struct RgbInner {
     color_cache: HashMap<usize, String>,
     anim_step: f64,
     wizard: Arc<crate::hid_wizard::HidPerKeyWizard>,
+    desktop_rgb: crate::desktop_rgb::DesktopRgbController,
 }
 
 #[derive(Clone)]
@@ -398,9 +399,14 @@ impl RgbService {
         let hid_per_key = HidPerKeyBackend::new();
         let wizard = Arc::new(crate::hid_wizard::HidPerKeyWizard::new());
         let evdev_monitor = crate::evdev_monitor::EvdevMonitor::new();
+        
+        let mut desktop_rgb = crate::desktop_rgb::DesktopRgbController::new();
+        if let Err(e) = desktop_rgb.initialize() {
+            warn!("RGB: Desktop RGB not initialized: {}", e);
+        }
 
         let inner = Arc::new(Mutex::new(RgbInner {
-            hw, hid_per_key, config, per_key_map, color_cache: HashMap::new(), anim_step: 0.0, wizard, evdev_monitor,
+            hw, hid_per_key, config, per_key_map, color_cache: HashMap::new(), anim_step: 0.0, wizard, evdev_monitor, desktop_rgb,
         }));
 
         let svc = Self { inner: inner.clone() };
@@ -668,11 +674,26 @@ impl RgbService {
         if g.hid_per_key.is_available() {
             if !power || brightness == 0 {
                 g.hid_per_key.send_enter_per_key_mode(0);
+                g.hid_per_key.set_zone_colors(&vec!["000000".to_string(); 8]);
             } else {
                 g.hid_per_key.send_enter_per_key_mode(brightness);
                 if mode == "static" {
                     g.hid_per_key.set_zone_colors(&colors);
                 }
+            }
+        }
+        
+        // ── Desktop RGB ─────────────────────────────────────────────────────────
+        if g.desktop_rgb.is_available() {
+            if !power || brightness == 0 {
+                let _ = g.desktop_rgb.set_static_colors(&[(0,0,0); 7], 0);
+            } else if mode == "static" {
+                let mut parsed_colors = Vec::new();
+                for i in 0..7 {
+                    let hex = colors.get(10 + i).cloned().unwrap_or_else(|| colors.get(0).cloned().unwrap_or_else(|| "FF0000".to_string()));
+                    parsed_colors.push(parse_hex_color(&hex));
+                }
+                let _ = g.desktop_rgb.set_static_colors(&parsed_colors, brightness as u8);
             }
         }
 
@@ -681,6 +702,7 @@ impl RgbService {
 
         if !power || brightness == 0 {
             g.hw.write_brightness(0);
+            g.hw.write_all("000000");
             return;
         }
 
@@ -718,13 +740,16 @@ impl RgbService {
         if hex.len() != 6 || !hex.chars().all(|c| c.is_ascii_hexdigit()) {
             return "FAIL".to_string();
         }
-        if zone_val != 8 && !(0..8).contains(&zone_val) {
+        if zone_val != 8 && !(0..17).contains(&zone_val) {
             return "FAIL".to_string();
         }
         {
             let mut g = self.inner.lock().await;
             g.config.mode = "static".to_string();
             g.config.power = true;
+            if g.config.colors.len() < 17 {
+                g.config.colors.resize(17, "FF0000".to_string());
+            }
             if zone_val == 8 {
                 for i in 0..8 { g.config.colors[i] = hex.clone(); }
             } else {
@@ -945,7 +970,15 @@ fn compute_anim_color(
 ) -> (u8, u8, u8) {
     use std::f64::consts::PI;
     match mode {
-        "wave" | "rainbow" | "cycle" => {
+        "wave" => {
+            let phase = step + (eff_idx as f64 * (2.0 * PI / zone_count as f64));
+            let factor = (phase.sin() * 0.5) + 0.5;
+            let r = (r1 as f64 * factor + r2 as f64 * (1.0 - factor)) as u8;
+            let g = (g1 as f64 * factor + g2 as f64 * (1.0 - factor)) as u8;
+            let b = (b1 as f64 * factor + b2 as f64 * (1.0 - factor)) as u8;
+            (r, g, b)
+        }
+        "rainbow" | "cycle" | "wave_rainbow" => {
             let hue = step + (eff_idx as f64 * (2.0 * PI / zone_count as f64));
             let r = ((hue.sin() * 127.0) + 128.0) as u8;
             let g = (((hue + 2.0 * PI / 3.0).sin() * 127.0) + 128.0) as u8;

@@ -20,6 +20,8 @@ mod bios_checker;
 mod auto_updater;
 mod game_automation;
 mod power_automation;
+pub mod desktop_rgb;
+mod hotkey_monitor;
 
 use log::info;
 use std::error::Error;
@@ -100,6 +102,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 .await?
         }
     };
+
+    // Start zero-overhead hotkey monitor
+    hotkey_monitor::HotkeyMonitor::start(_conn.clone());
 
     info!("omen-space-daemon successfully registered all microservices & WMI diagnostic engines on D-Bus.");
 

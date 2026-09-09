@@ -51,17 +51,24 @@ impl RgbHardware {
         let new_path = "/sys/devices/platform/omen-rgb-keyboard/rgb_zones";
         let custom_path = "/sys/devices/platform/hp-omen-extra";
         let hp_path2 = "/sys/devices/platform/hp_omen_extra";
+        let board_id = std::fs::read_to_string("/sys/class/dmi/id/board_name").unwrap_or_default();
+        let prod_name = std::fs::read_to_string("/sys/class/dmi/id/product_name").unwrap_or_default();
+        let specs = crate::sysmon::get_hardware_specs();
+        let caps = crate::capabilities::detect(board_id.trim(), prod_name.trim(), &specs.cpu_spec);
+        let max_zones = if caps.has_four_zone_rgb { 4 } else { 8 };
 
         if Path::new(new_path).exists() {
             // Count zones for new driver (8 for per-key models, else 4)
-            let zone_count = if Path::new("/sys/devices/platform/omen-rgb-keyboard/rgb_zones/zone04").exists() { 8 } else { 4 };
+            let mut zone_count = if Path::new("/sys/devices/platform/omen-rgb-keyboard/rgb_zones/zone04").exists() { 8 } else { 4 };
+            if zone_count > max_zones { zone_count = max_zones; }
             return Self { driver_path: Some(new_path.to_string()), is_new_driver: true, zone_count, available: true };
         }
         for p in [custom_path, hp_path2] {
             if Path::new(p).exists() {
                 // Detect zone count: check if zone4 exists
-                let zone_count = if Path::new(&format!("{}/zone4", p)).exists()
+                let mut zone_count = if Path::new(&format!("{}/zone4", p)).exists()
                     || Path::new(&format!("{}/zone04", p)).exists() { 8 } else { 4 };
+                if zone_count > max_zones { zone_count = max_zones; }
                 return Self { driver_path: Some(p.to_string()), is_new_driver: false, zone_count, available: true };
             }
         }
@@ -78,7 +85,7 @@ impl RgbHardware {
         let Some(ref base) = self.driver_path else { return; };
         if zone > 7 { return; }
 
-        let actual_zone = zone;
+        let actual_zone = if self.zone_count == 4 && zone <= 3 { 3 - zone } else { zone };
 
         let filename = if self.is_new_driver {
             format!("zone{:02}", actual_zone)

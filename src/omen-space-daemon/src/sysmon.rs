@@ -330,17 +330,16 @@ pub fn get_hardware_specs() -> HardwareSpecs {
 }
 
 fn check_nvidia_state() -> Option<bool> {
-    if let Ok(entries) = glob::glob("/sys/bus/pci/devices/*/vendor") {
-        for entry in entries.filter_map(Result::ok) {
-            if let Ok(vendor) = fs::read_to_string(&entry) {
-                if vendor.trim().to_lowercase() == "0x10de" {
-                    if let Some(parent) = entry.parent() {
-                        let status_path = parent.join("power/runtime_status");
-                        if let Ok(status) = fs::read_to_string(status_path) {
-                            return Some(status.trim() == "active");
-                        }
+    for driver in &["nvidia", "nouveau"] {
+        let glob_path = format!("/sys/bus/pci/drivers/{}/*", driver);
+        if let Ok(entries) = glob::glob(&glob_path) {
+            for entry in entries.filter_map(Result::ok) {
+                if entry.file_name().and_then(|n| n.to_str()).map_or(false, |s| s.contains(':')) {
+                    let status_path = entry.join("power/runtime_status");
+                    if let Ok(status) = fs::read_to_string(status_path) {
+                        return Some(status.trim() == "active");
                     }
-                    return Some(true);
+                    return Some(true); // Fallback if no runtime_status
                 }
             }
         }

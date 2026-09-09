@@ -102,6 +102,7 @@ trait Rgb {
     async fn light_key_index(&self, index: u32, hex_color: &str) -> zbus::Result<String>;
     async fn record_key_mapping(&self, index: u32, key_name: &str) -> zbus::Result<String>;
     async fn export_keymap_report(&self) -> zbus::Result<String>;
+    async fn set_zone_count_override(&self, zone_count: i32) -> zbus::Result<String>;
 }
 
 // ── Platform Service Proxy ───────────────────────────────────────────────────
@@ -423,6 +424,22 @@ pub fn set_color_sync(zone_val: i32, hex_color: String) {
         if let Ok(conn) = get_conn().await {
             if let Ok(proxy) = RgbProxy::new(&conn).await {
                 if let Err(e) = proxy.set_color(zone_val, &hex_color).await {
+                    eprintln!("D-Bus call failed: {}", e);
+                }
+            }
+        }
+    });
+}
+
+/// Persist the physical keyboard zone count (4 or 8) on the legacy
+/// hp-omen-extra driver, or clear the override with 0. The daemon
+/// re-detects hardware and re-applies RGB state immediately.
+pub fn set_zone_count_override_sync(zone_count: i32) {
+    let rt = get_runtime();
+    rt.spawn(async move {
+        if let Ok(conn) = get_conn().await {
+            if let Ok(proxy) = RgbProxy::new(&conn).await {
+                if let Err(e) = proxy.set_zone_count_override(zone_count).await {
                     eprintln!("D-Bus call failed: {}", e);
                 }
             }

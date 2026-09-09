@@ -284,8 +284,22 @@ pub fn build_page(window: &adw::ApplicationWindow, on_lang_changed: Option<Rc<dy
     });
     
     let s6 = save_settings_rc.clone();
-    zone_override_row.connect_selected_notify(move |_| {
+    zone_override_row.connect_selected_notify(move |r| {
         s6();
+        // Forward to the daemon so the hp-omen-extra zone-count fix
+        // persists across restarts. Only 0 (Auto), 1 (4-Zone), and
+        // 3 (Per-Key, implies 8-zone hardware) map to a sysfs zone
+        // count; Victus single-zone and Desktop case RGB are handled
+        // by a different code path and don't affect this override.
+        let zone_count: Option<i32> = match r.selected() {
+            0 => Some(0), // clear override, fall back to auto/default
+            1 => Some(4),
+            3 => Some(8),
+            _ => None,
+        };
+        if let Some(zc) = zone_count {
+            crate::daemon_client::set_zone_count_override_sync(zc);
+        }
         if let Some(cb) = &on_lang_changed_clone_zone {
             cb();
         }

@@ -48,6 +48,27 @@ struct RgbHardware {
 
 impl RgbHardware {
     fn detect() -> Self {
+        Self::detect_with_override(None)
+    }
+
+    /// `zone_override`: Some(4) or Some(8) forces the zone count on the
+    /// legacy hp-omen-extra/hp_omen_extra driver, whose sysfs interface
+    /// always exposes zone0..zone7 regardless of whether the board is
+    /// physically 4-zone or 8-zone (same kernel module for both — see
+    /// driver/hp-omen-extra.c). None uses the built-in default (4).
+    fn detect_with_override(zone_override: Option<u32>) -> Self {
+        let mut hw = Self::detect_raw();
+        if !hw.is_new_driver {
+            if let Some(n) = zone_override {
+                if n == 4 || n == 8 {
+                    hw.zone_count = n;
+                }
+            }
+        }
+        hw
+    }
+
+    fn detect_raw() -> Self {
         let new_path = "/sys/devices/platform/omen-rgb-keyboard/rgb_zones";
         let custom_path = "/sys/devices/platform/hp-omen-extra";
         let hp_path2 = "/sys/devices/platform/hp_omen_extra";
@@ -59,9 +80,13 @@ impl RgbHardware {
         }
         for p in [custom_path, hp_path2] {
             if Path::new(p).exists() {
-                // Detect zone count: check if zone4 exists
-                let zone_count = if Path::new(&format!("{}/zone4", p)).exists()
-                    || Path::new(&format!("{}/zone04", p)).exists() { 8 } else { 4 };
+                // NOTE: hp-omen-extra always registers zone0..zone7 sysfs
+                // files unconditionally (see driver/hp-omen-extra.c) regardless
+                // of whether the board is physically 4-zone or 8-zone, since it's
+                // the same kernel module for both. File existence alone can't
+                // distinguish them, so default to 4 (the more common case) and
+                // let RgbConfig.zone_count_override correct it per-board.
+                let zone_count = 4;
                 return Self { driver_path: Some(p.to_string()), is_new_driver: false, zone_count, available: true };
             }
         }
@@ -78,8 +103,21 @@ impl RgbHardware {
         let Some(ref base) = self.driver_path else { return; };
         if zone > 7 { return; }
 
-        let actual_zone = zone;
-
+        // Map GUI logical zone order (0=Left, 1=Middle, 2=Right, 3=WASD)
+        // to physical hardware zone indices on 4-zone keyboards.
+        // Empirically verified: hardware zone0=Right, zone1=Middle,
+        // zone2=Left, zone3=WASD.
+        let actual_zone = if self.zone_count == 4 {
+            match zone {
+                0 => 2, // Software Left   -> Hardware Left (2)
+                1 => 1, // Software Middle -> Hardware Middle (1)
+                2 => 0, // Software Right  -> Hardware Right (0)
+                3 => 3, // Software WASD   -> Hardware WASD (3)
+                z => z,
+            }
+        } else {
+            zone
+        };
         let filename = if self.is_new_driver {
             format!("zone{:02}", actual_zone)
         } else {
@@ -318,6 +356,12 @@ struct RgbConfig {
     direction: String,
     power: bool,
     win_lock: bool,
+    /// User-declared physical zone count for the hp-omen-extra driver
+    /// (4 or 8). None means auto/default. Set via GUI Settings ->
+    /// Zone Mode Override, since the driver's sysfs files can't tell us
+    /// which one the board actually has.
+    #[serde(default)]
+    zone_count_override: Option<u32>,
 }
 
 impl Default for RgbConfig {
@@ -330,6 +374,7 @@ impl Default for RgbConfig {
             direction: "ltr".to_string(),
             power: true,
             win_lock: false,
+            zone_count_override: None,
         }
     }
 }
@@ -387,14 +432,14 @@ pub struct RgbService {
 
 impl RgbService {
     pub async fn new() -> Result<Self, Box<dyn std::error::Error>> {
-        let hw = RgbHardware::detect();
+        let config = RgbConfig::load();
+        let hw = RgbHardware::detect_with_override(config.zone_count_override);
         if hw.available {
-            info!("RGB: Driver at {:?} (new_driver={})", hw.driver_path, hw.is_new_driver);
+            info!("RGB: Driver at {:?} (new_driver={}, zone_count={})", hw.driver_path, hw.is_new_driver, hw.zone_count);
         } else {
             warn!("RGB: No RGB hardware driver found");
         }
 
-        let config = RgbConfig::load();
         let per_key_map = Self::load_per_key_map();
         let hid_per_key = HidPerKeyBackend::new();
         let wizard = Arc::new(crate::hid_wizard::HidPerKeyWizard::new());
@@ -812,6 +857,7 @@ impl RgbService {
             "driver_path": g.hw.driver_path.clone().unwrap_or_default(),
             "is_new_driver": g.hw.is_new_driver,
             "zone_count": g.hw.zone_count,
+            "zone_count_override": g.config.zone_count_override,
             "per_key_available": g.hid_per_key.is_available(),
             "hid_device_pid": g.hid_per_key.device_pid.map(|p| format!("{:04X}", p)).unwrap_or_default(),
         });
@@ -822,6 +868,31 @@ impl RgbService {
             );
         }
         snap.to_string()
+    }
+
+    /// SetZoneCountOverride(n) — Force the physical zone count (4 or 8) used
+    /// for the legacy hp-omen-extra/hp_omen_extra driver, since its sysfs
+    /// interface always exposes zone0..zone7 regardless of the board's real
+    /// zone count and there is no reliable way to auto-detect it from the
+    /// WMI interface. Pass 0 to clear the override and fall back to the
+    /// default (4). Re-detects hardware and re-applies state immediately so
+    /// the change is visible without restarting the daemon.
+    async fn set_zone_count_override(&self, zone_count: i32) -> String {
+        let normalized = match zone_count {
+            0 => None,
+            4 => Some(4),
+            8 => Some(8),
+            _ => return "FAIL: zone_count must be 0 (clear), 4, or 8".to_string(),
+        };
+        {
+            let mut g = self.inner.lock().await;
+            g.config.zone_count_override = normalized;
+            g.config.save();
+            g.hw = RgbHardware::detect_with_override(normalized);
+            info!("SetZoneCountOverride: override={:?}, effective zone_count={}", normalized, g.hw.zone_count);
+        }
+        Self::apply_state(self.inner.clone()).await;
+        "OK".to_string()
     }
 
     /// SetWinLock(locked) — mirrors Python SetWinLock().

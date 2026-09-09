@@ -102,24 +102,31 @@ impl MuxService {
             }
         }
 
-        // 2. lspci fallback
-        if let Ok(out) = tokio::process::Command::new("lspci").arg("-D").output().await {
-            let text = String::from_utf8_lossy(&out.stdout).to_lowercase();
-            let mut has_nvidia = false;
-            let mut has_igpu = false;
-            for line in text.lines() {
-                if line.contains("vga compatible controller")
-                    || line.contains("3d controller")
-                    || line.contains("display controller")
-                {
-                    if line.contains("nvidia") { has_nvidia = true; }
-                    else if line.contains("intel") || line.contains("amd")
-                        || line.contains("advanced micro devices") { has_igpu = true; }
+        // 2. Sysfs driver check (replaces lspci -D to prevent waking dGPU from D3cold)
+        let mut has_nvidia = false;
+        let mut has_igpu = false;
+        
+        for driver in &["nvidia", "nouveau"] {
+            if let Ok(entries) = glob(&format!("/sys/bus/pci/drivers/{}/*", driver)) {
+                for entry in entries.filter_map(Result::ok) {
+                    if entry.file_name().and_then(|n| n.to_str()).map_or(false, |s| s.contains(':')) {
+                        has_nvidia = true;
+                    }
                 }
             }
-            if has_nvidia && !has_igpu { return "discrete".to_string(); }
-            if has_nvidia && has_igpu  { return "hybrid".to_string(); }
         }
+        for driver in &["amdgpu", "i915", "xe"] {
+            if let Ok(entries) = glob(&format!("/sys/bus/pci/drivers/{}/*", driver)) {
+                for entry in entries.filter_map(Result::ok) {
+                    if entry.file_name().and_then(|n| n.to_str()).map_or(false, |s| s.contains(':')) {
+                        has_igpu = true;
+                    }
+                }
+            }
+        }
+        
+        if has_nvidia && !has_igpu { return "discrete".to_string(); }
+        if has_nvidia && has_igpu  { return "hybrid".to_string(); }
 
         "unknown".to_string()
     }

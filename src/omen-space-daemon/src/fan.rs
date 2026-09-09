@@ -269,33 +269,36 @@ impl FanService {
                 let mut p = Vec::new();
                 if let Ok(entries) = glob("/sys/class/hwmon/hwmon*/temp*_input") {
                     for entry in entries.filter_map(Result::ok) {
-                        p.push(entry);
+                        let mut is_dgpu = false;
+                        if let Ok(real_path) = std::fs::canonicalize(&entry) {
+                            let s = real_path.to_string_lossy();
+                            if s.contains("0000:01:00.0") || s.contains("nvidia") || s.contains("nouveau") {
+                                is_dgpu = true;
+                            }
+                        }
+                        if !is_dgpu { p.push(entry); }
                     }
                 }
                 p
             });
 
             let mut max_temp = 45.0;
+            // 1. Read CPU / motherboard sensors via standard hwmon
             for entry in paths {
-                // CRITICAL: Prevent waking up dGPU from D3cold by checking runtime_status
-                if let Some(parent) = entry.parent() {
-                    let runtime_status = parent.join("device/power/runtime_status");
-                    if let Ok(status) = std::fs::read_to_string(&runtime_status) {
-                        if status.trim() == "suspended" {
-                            continue;
-                        }
-                    }
-                }
-                
                 if let Ok(val_str) = std::fs::read_to_string(entry) {
                     if let Ok(milli) = val_str.trim().parse::<f64>() {
                         let temp = milli / 1000.0;
-                        if temp > max_temp && temp < 150.0 {
-                            max_temp = temp;
-                        }
+                        if temp > max_temp && temp < 150.0 { max_temp = temp; }
                     }
                 }
             }
+
+            // 2. Factor in dGPU temperature safely
+            let gpu_temp = crate::sysmon::get_safe_gpu_temp();
+            if gpu_temp > max_temp && gpu_temp < 150.0 {
+                max_temp = gpu_temp;
+            }
+
             max_temp
         })
         .await

@@ -160,6 +160,10 @@ fn init_sensor_paths() -> SensorPaths {
     }
 }
 
+pub fn get_safe_gpu_temp() -> f64 {
+    fetch_system_stats().gpu_temp as f64
+}
+
 pub fn get_hardware_specs() -> HardwareSpecs {
     SPECS_CACHE.get_or_init(|| {
         let mut specs = HardwareSpecs::default();
@@ -498,7 +502,7 @@ pub fn fetch_system_stats() -> SystemStats {
         }
     }
 
-    if !nvml_queried {
+    if !nvml_queried && is_nvidia_awake {
         if let Some(ref p) = paths.gpu_temp_path {
             if let Ok(s) = fs::read_to_string(p) {
                 if let Ok(milli) = s.trim().parse::<f64>() {

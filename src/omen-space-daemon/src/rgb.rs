@@ -85,7 +85,14 @@ impl RgbHardware {
         let Some(ref base) = self.driver_path else { return; };
         if zone > 7 { return; }
 
-        let actual_zone = if self.zone_count == 4 && zone <= 3 { 3 - zone } else { zone };
+        let actual_zone = if self.zone_count == 4 {
+            match zone {
+                0 => 2, // Left
+                1 => 1, // Middle
+                2 => 0, // Right
+                _ => 7, // WASD
+            }
+        } else { zone };
 
         let filename = if self.is_new_driver {
             format!("zone{:02}", actual_zone)

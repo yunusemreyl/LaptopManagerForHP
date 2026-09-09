@@ -102,24 +102,38 @@ impl MuxService {
             }
         }
 
-        // 2. lspci fallback
-        if let Ok(out) = tokio::process::Command::new("lspci").arg("-D").output().await {
-            let text = String::from_utf8_lossy(&out.stdout).to_lowercase();
-            let mut has_nvidia = false;
-            let mut has_igpu = false;
-            for line in text.lines() {
-                if line.contains("vga compatible controller")
-                    || line.contains("3d controller")
-                    || line.contains("display controller")
-                {
-                    if line.contains("nvidia") { has_nvidia = true; }
-                    else if line.contains("intel") || line.contains("amd")
-                        || line.contains("advanced micro devices") { has_igpu = true; }
+        // 2. Passive sysfs check (replaces lspci -D to prevent waking dGPU from D3cold)
+    let mut has_nvidia = false;
+    let mut has_igpu = false;
+
+    if let Ok(entries) = std::fs::read_dir("/sys/bus/pci/devices") {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let class = std::fs::read_to_string(path.join("class")).unwrap_or_default();
+            let class = class.trim();
+
+            // Check for display controllers: 0x030000 (VGA) or 0x030200 (3D Controller)
+            if class.starts_with("0x03") {
+                let vendor = std::fs::read_to_string(path.join("vendor")).unwrap_or_default();
+                let vendor = vendor.trim().to_lowercase();
+
+                if vendor == "0x10de" {
+                    has_nvidia = true;
+                } else if vendor == "0x1002" || vendor == "0x8086" {
+                    // AMD (0x1002) or Intel (0x8086)
+                    has_igpu = true;
                 }
             }
-            if has_nvidia && !has_igpu { return "discrete".to_string(); }
-            if has_nvidia && has_igpu  { return "hybrid".to_string(); }
         }
+    }
+
+    if has_nvidia && has_igpu {
+        return "hybrid".to_string();
+    } else if has_nvidia {
+        return "discrete".to_string();
+    } else if has_igpu {
+        return "integrated".to_string();
+    }
 
         "unknown".to_string()
     }

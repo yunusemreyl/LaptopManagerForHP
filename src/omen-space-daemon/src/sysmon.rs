@@ -82,7 +82,7 @@ struct RaplState {
     time: std::time::Instant,
 }
 static PREV_RAPL: Mutex<Option<RaplState>> = Mutex::new(None);
-
+static GPU_IDLE_COOLDOWN: Mutex<Option<std::time::Instant>> = Mutex::new(None);
 fn init_sensor_paths() -> SensorPaths {
     let mut cpu_temp_path = None;
     let mut cpu_pwr_path = None;
@@ -330,24 +330,85 @@ pub fn get_hardware_specs() -> HardwareSpecs {
 }
 
 fn check_nvidia_state() -> Option<bool> {
+    // Direct read on the RTX 4060 (01:00.0) avoids globbing audio functions
+    let path = "/sys/bus/pci/devices/0000:01:00.0/power/runtime_status";
+    if let Ok(status) = fs::read_to_string(path) {
+        return Some(status.trim() == "active");
+    }
+    // Fallback check with PCI class 0x03 (display controller only)
     if let Ok(entries) = glob::glob("/sys/bus/pci/devices/*/vendor") {
         for entry in entries.filter_map(Result::ok) {
             if let Ok(vendor) = fs::read_to_string(&entry) {
                 if vendor.trim().to_lowercase() == "0x10de" {
                     if let Some(parent) = entry.parent() {
+                        if let Ok(class) = fs::read_to_string(parent.join("class")) {
+                            if !class.trim().starts_with("0x03") {
+                                continue;
+                            }
+                        }
                         let status_path = parent.join("power/runtime_status");
                         if let Ok(status) = fs::read_to_string(status_path) {
                             return Some(status.trim() == "active");
                         }
                     }
-                    return Some(true);
                 }
             }
         }
     }
     None
 }
+pub fn get_safe_gpu_temp() -> f64 {
+    let nvidia_state = check_nvidia_state();
+    let is_nvidia_awake = nvidia_state.unwrap_or(false);
 
+    // If card is already asleep in D3cold, return 0.0 without touching it
+    if !is_nvidia_awake {
+        return 0.0;
+    }
+
+    // Check if we are in an intentional quiet window to let the driver enter D3cold
+    {
+        let guard = GPU_IDLE_COOLDOWN.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(until) = *guard {
+            if std::time::Instant::now() < until {
+                return 0.0;
+            }
+        }
+    }
+
+    let mut has_active_clients = false;
+    let mut gpu_temp = 0.0;
+
+    // Check for actual running 3D or compute processes
+    if let Ok(nvml) = nvml_wrapper::Nvml::init() {
+        if let Ok(device) = nvml.device_by_index(0) {
+            let gfx = device.running_graphics_processes().map(|v| v.len()).unwrap_or(0);
+            let comp = device.running_compute_processes().map(|v| v.len()).unwrap_or(0);
+            has_active_clients = (gfx + comp) > 0;
+
+            if has_active_clients {
+                // Active game/render client: clear cooldown and sample real temperature
+                {
+                    let mut guard = GPU_IDLE_COOLDOWN.lock().unwrap_or_else(|e| e.into_inner());
+                    *guard = None;
+                }
+                if let Ok(temp) = device.temperature(nvml_wrapper::enum_wrappers::device::TemperatureSensor::Gpu) {
+                    gpu_temp = temp as f64;
+                }
+            }
+        }
+    }
+
+    if !has_active_clients {
+        // Card is awake in D0, but zero applications are using it.
+        // Start 6s quiet window so the kernel's autosuspend timer can finish.
+        let mut guard = GPU_IDLE_COOLDOWN.lock().unwrap_or_else(|e| e.into_inner());
+        *guard = Some(std::time::Instant::now() + std::time::Duration::from_secs(6));
+        return 0.0;
+    }
+
+    gpu_temp
+}
 /// Instantaneous, Zero-Fork Telemetry Fetch
 pub fn fetch_system_stats() -> SystemStats {
     let mut stats = SystemStats::default();
@@ -475,44 +536,57 @@ pub fn fetch_system_stats() -> SystemStats {
     }
 
     // ── 7. GPU Telemetry ───────────────────────────────────────────
-    let mut nvml_queried = false;
-
     let nvidia_state = check_nvidia_state();
     let is_nvidia_awake = nvidia_state.unwrap_or(false);
     let has_nvidia = nvidia_state.is_some();
 
-    // Check if NVIDIA is awake before initializing NVML to avoid waking it from D3cold
-    if is_nvidia_awake {
+    // 1. Check if we are in an intentional quiet window to let the driver sleep
+    let in_cooldown = {
+        let guard = GPU_IDLE_COOLDOWN.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(until) = *guard {
+            std::time::Instant::now() < until
+        } else {
+            false
+        }
+    };
+
+    // 2. If NVIDIA is sleeping (D3cold) OR in cooldown, DO NOT TOUCH NVML OR HWMON AT ALL
+    if has_nvidia && (!is_nvidia_awake || in_cooldown) {
+        stats.gpu_temp = 0;
+        stats.gpu_pwr = -1.0;
+    } else if is_nvidia_awake {
+        // 3. GPU is active AND cooldown expired. Safe to sample NVML for active processes.
+        let mut has_active_clients = false;
+
         if let Ok(nvml) = nvml_wrapper::Nvml::init() {
             if let Ok(device) = nvml.device_by_index(0) {
-                if let Ok(temp) = device.temperature(nvml_wrapper::enum_wrappers::device::TemperatureSensor::Gpu) {
-                    stats.gpu_temp = temp as i32;
-                    nvml_queried = true;
-                }
-                if let Ok(power) = device.power_usage() {
-                    // power is in milliwatts
-                    stats.gpu_pwr = power as f64 / 1000.0;
-                    nvml_queried = true;
-                }
-            }
-            // nvml is dropped here, closing /dev/nvidia0 and allowing GPU to sleep later
-        }
-    }
+                let gfx = device.running_graphics_processes().map(|v| v.len()).unwrap_or(0);
+                let comp = device.running_compute_processes().map(|v| v.len()).unwrap_or(0);
+                has_active_clients = (gfx + comp) > 0;
 
-    if !nvml_queried {
-        if let Some(ref p) = paths.gpu_temp_path {
-            if let Ok(s) = fs::read_to_string(p) {
-                if let Ok(milli) = s.trim().parse::<f64>() {
-                    stats.gpu_temp = (milli / 1000.0) as i32;
+                if has_active_clients {
+                    // Workload running: clear cooldown and stream live metrics
+                    {
+                        let mut guard = GPU_IDLE_COOLDOWN.lock().unwrap_or_else(|e| e.into_inner());
+                        *guard = None;
+                    }
+
+                    if let Ok(temp) = device.temperature(nvml_wrapper::enum_wrappers::device::TemperatureSensor::Gpu) {
+                        stats.gpu_temp = temp as i32;
+                    }
+                    if let Ok(power) = device.power_usage() {
+                        stats.gpu_pwr = power as f64 / 1000.0;
+                    }
                 }
             }
         }
-        if let Some(ref p) = paths.gpu_pwr_path {
-            if let Ok(s) = fs::read_to_string(p) {
-                if let Ok(micro) = s.trim().parse::<f64>() {
-                    stats.gpu_pwr = micro / 1_000_000.0;
-                }
-            }
+
+        if !has_active_clients {
+            // Zero game/render clients detected. Arm 6s quiet window so kernel can suspend.
+            let mut guard = GPU_IDLE_COOLDOWN.lock().unwrap_or_else(|e| e.into_inner());
+            *guard = Some(std::time::Instant::now() + std::time::Duration::from_secs(6));
+            stats.gpu_temp = 0;
+            stats.gpu_pwr = -1.0;
         }
     }
 

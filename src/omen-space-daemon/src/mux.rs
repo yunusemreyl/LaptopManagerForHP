@@ -92,9 +92,10 @@ impl MuxService {
                 let status_path = entry.join("status");
                 if let Ok(status) = tokio::fs::read_to_string(&status_path).await {
                     if status.trim() != "connected" { continue; }
-                    let vendor_path = entry.join("device/device/vendor");
-                    if let Ok(vendor) = tokio::fs::read_to_string(&vendor_path).await {
-                        if vendor.trim().to_lowercase() == "0x10de" {
+                    let driver_path = entry.join("device/device/driver");
+                    if let Ok(target) = tokio::fs::read_link(&driver_path).await {
+                        let target_str = target.to_string_lossy().to_lowercase();
+                        if target_str.contains("nvidia") || target_str.contains("nouveau") {
                             return "discrete".to_string();
                         }
                     }
@@ -133,7 +134,6 @@ impl MuxService {
 
     /// Enumerate connected displays with GPU vendor — mirrors Python _get_displays().
     async fn get_displays() -> Vec<serde_json::Value> {
-        let vendors_map = [("0x10de", "NVIDIA"), ("0x8086", "Intel"), ("0x1002", "AMD")];
         let mut result = Vec::new();
 
         if let Ok(entries) = glob("/sys/class/drm/card[0-9]*-*") {
@@ -141,20 +141,26 @@ impl MuxService {
                 let status_path = entry.join("status");
                 if let Ok(status) = tokio::fs::read_to_string(&status_path).await {
                     if status.trim() != "connected" { continue; }
-                    let vendor_path = entry.join("device/device/vendor");
-                    let vendor_str = tokio::fs::read_to_string(&vendor_path).await
-                        .map(|s| s.trim().to_lowercase())
-                        .unwrap_or_default();
-                    let gpu_name = vendors_map.iter()
-                        .find(|(id, _)| vendor_str == *id)
-                        .map(|(_, name)| *name)
-                        .unwrap_or("Unknown GPU");
-                    let disp_name = entry.file_name()
-                        .and_then(|n| n.to_str())
-                        .and_then(|s| s.splitn(2, '-').nth(1))
-                        .unwrap_or("unknown")
-                        .to_string();
-                    result.push(serde_json::json!({ "display": disp_name, "gpu": gpu_name }));
+                    let driver_path = entry.join("device/device/driver");
+                    let mut gpu_vendor = "Unknown";
+                    if let Ok(target) = tokio::fs::read_link(&driver_path).await {
+                        let target_str = target.to_string_lossy().to_lowercase();
+                        if target_str.contains("nvidia") || target_str.contains("nouveau") {
+                            gpu_vendor = "NVIDIA";
+                        } else if target_str.contains("i915") || target_str.contains("xe") {
+                            gpu_vendor = "Intel";
+                        } else if target_str.contains("amdgpu") || target_str.contains("radeon") {
+                            gpu_vendor = "AMD";
+                        }
+                    }
+
+                    if let Some(name) = entry.file_name().and_then(|n| n.to_str()) {
+                        let disp_name = name.split('-').skip(1).collect::<Vec<_>>().join("-");
+                        result.push(serde_json::json!({
+                            "display": disp_name,
+                            "gpu": gpu_vendor
+                        }));
+                    }
                 }
             }
         }
